@@ -9,6 +9,8 @@ mod stem_volume;
 mod library_ui;
 mod library_drop;
 mod library_listen;
+mod theme;
+pub(crate) use theme::*;
 use crate::analysis::{self, Analysis, Audio, PEAK_HOP};
 use crate::engine::{self, Cmd, Shared, Snap};
 use crate::model::{Mix, Preset, StemMode, Track};
@@ -17,16 +19,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-const ACCENT: C = C::from_rgb(232, 224, 0);
-const BG: C = C::from_rgb(26, 27, 31);
-const PANEL: C = C::from_rgb(36, 38, 43);
-const ROW: C = C::from_rgb(30, 32, 36);
-const LINE: C = C::from_rgb(52, 55, 61);
-const TXT: C = C::from_rgb(220, 222, 226);
-const DIM: C = C::from_rgb(140, 144, 152);
-const BLUE: C = C::from_rgb(84, 104, 236);
 const OLIVE: C = C::from_rgb(98, 96, 22);
-const STEM: [C; 4] = [C::from_rgb(58, 150, 92), C::from_rgb(212, 172, 74), C::from_rgb(206, 80, 72), C::from_rgb(76, 102, 200)];
 const STEM_N: [&str; 4] = ["Drums", "Bass", "Melody", "Vocals"];
 const HEAD_W: f32 = 132.0;
 const RULER_H: f32 = 30.0;
@@ -36,7 +29,7 @@ const TEMPO_H: f32 = 22.0;
 const MAX_DRIFT_PERCENT: f64 = 2.0;
 
 #[derive(PartialEq, Clone, Copy)]
-enum Tab { Zoom, Library, Playlist, Transition, Track, Grid, Compare, Video, Effects, Master, Samples }
+enum Tab { Zoom, Library, Playlist, Transition, Track, Grid, Compare, Effects, Master, Samples }
 #[derive(PartialEq, Clone, Copy)]
 enum Snapping { Off, Free, Half, Full }
 
@@ -108,7 +101,7 @@ pub fn icon_rgba(n: u32) -> Vec<u8> {
         let u = (fx / c + 0.8) / 1.6 * 9.0; let bx = u.floor() as i32;
         if (0..9).contains(&bx) && u.fract() < 0.7 {
             let h = [0.25, 0.45, 0.7, 0.4, 0.85, 0.5, 0.65, 0.35, 0.2][bx as usize];
-            if (fy / c).abs() < h * 0.75 { col = if bx < 4 { [70, 100, 236] } else { [232, 224, 0] }; }
+            if (fy / c).abs() < h * 0.75 { col = if bx < 4 { [10, 132, 255] } else { [229, 240, 0] }; }
         }
         v[i..i + 4].copy_from_slice(&[col[0], col[1], col[2], 255]);
     } }
@@ -162,23 +155,7 @@ impl App {
         Self::new_with(&cc.egui_ctx,demo,crate::audio::start(),lib)
     }
     fn new_with(ctx: &egui::Context, demo: Option<String>, out: crate::audio::Audio, lib: crate::library::Library) -> Self {
-        let mut st = egui::Style::default(); st.visuals = egui::Visuals::dark();
-        st.visuals.panel_fill = PANEL; st.visuals.window_fill = PANEL; st.visuals.extreme_bg_color = BG;
-        st.visuals.selection.bg_fill = C::from_rgb(110, 106, 10); st.visuals.selection.stroke = Stroke::new(1.0_f32, ACCENT);
-        st.visuals.widgets.inactive.bg_fill = C::from_rgb(52, 54, 60); st.visuals.widgets.inactive.weak_bg_fill = C::from_rgb(52, 54, 60);
-        st.visuals.widgets.hovered.weak_bg_fill = C::from_rgb(66, 68, 76);
-        for w in [&mut st.visuals.widgets.inactive, &mut st.visuals.widgets.hovered, &mut st.visuals.widgets.active] { w.rounding = Rounding::same(6.0); }
-        st.spacing.button_padding = vec2(8.0, 4.0);
-        // Calmer chrome: hairline borders, accent hint on hover, matching rounding for popups and tooltips.
-        st.spacing.item_spacing = vec2(8.0, 6.0); st.spacing.interact_size.y = 22.0;
-        st.visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, LINE); st.visuals.widgets.noninteractive.rounding = Rounding::same(6.0);
-        st.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, C::from_rgb(60, 63, 70));
-        st.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, C::from_rgb(150, 146, 40));
-        st.visuals.widgets.active.bg_stroke = Stroke::new(1.0_f32, ACCENT);
-        st.visuals.window_rounding = Rounding::same(8.0); st.visuals.menu_rounding = Rounding::same(6.0);
-        st.visuals.window_stroke = Stroke::new(1.0_f32, LINE); st.visuals.faint_bg_color = ROW;
-        st.visuals.hyperlink_color = ACCENT; st.visuals.warn_fg_color = C::from_rgb(240, 200, 80);
-        ctx.set_style(st);
+        theme::apply(ctx);
         let (tx, rx) = crossbeam_channel::unbounded();
         // background stem-separation worker (one job at a time; the model session is reused)
         let (stem_tx, stem_rx) = crossbeam_channel::unbounded::<StemJob>();
@@ -757,7 +734,7 @@ impl eframe::App for App {
         self.transport(ctx);
         egui::SidePanel::right("master").exact_width(42.0).resizable(false).frame(egui::Frame::none().fill(BG)).show(ctx, |ui| self.master_meter(ui));
         self.persistence_windows(ctx);
-        self.timeline_rect = egui::CentralPanel::default().frame(egui::Frame::none().fill(BG)).show(ctx, |ui| self.timeline(ui)).response.rect;
+        self.timeline_rect = egui::CentralPanel::default().frame(egui::Frame::none().fill(BG_WELL)).show(ctx, |ui| self.timeline(ui)).response.rect;
         self.library_drag_frame(ctx);
         let hovering = ctx.input(|i| i.raw.hovered_files.len());
         if hovering > 0 {
@@ -773,25 +750,20 @@ impl eframe::App for App {
     }
 }
 
-fn seg_button(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
-    ui.add(egui::Button::new(egui::RichText::new(text).color(if on { ACCENT } else { TXT }))
-        .fill(if on { C::from_rgb(60, 58, 20) } else { C::TRANSPARENT }).stroke(if on { Stroke::new(1.0_f32, ACCENT) } else { Stroke::NONE }))
-}
-
 impl App {
     fn top_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("top").exact_height(44.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(10.0, 6.0))).show(ctx, |ui| {
+        egui::TopBottomPanel::top("top").exact_height(52.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(12.0, 8.0)).stroke(Stroke::new(1.0_f32, LINE_SOFT))).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 if ui.add(egui::Button::new("🏠").min_size(vec2(30.0, 28.0))).on_hover_text("New empty mix").clicked() { self.new_project(); }
-                ui.spacing_mut().item_spacing.x = 0.0;
-                ui.label(egui::RichText::new("Mix").color(ACCENT).size(20.0).strong());
-                ui.label(egui::RichText::new("Studio").color(TXT).size(20.0).strong());
-                ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add_space(14.0);
-                let name = format!("☰  {}{}   ⏷", self.mix.name,if self.persistence.error.is_some(){" ⚠ *"}else if self.persistence.dirty{" *"}else{""});
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new("MixStudio").size(15.0).strong().color(TXT));
+                    ui.label(egui::RichText::new(format!("{} track{}", self.mix.tracks.len(), if self.mix.tracks.len() == 1 { "" } else { "s" })).size(11.0).color(MUTED));
+                });
+                ui.add_space(12.0);
+                let dirty = if self.persistence.error.is_some() { " ⚠" } else if self.persistence.dirty { " •" } else { "" };
+                let name = format!("{}{}", self.mix.name, dirty);
                 ui.scope(|ui| {
-                    let wv = &mut ui.visuals_mut().widgets; for w in [&mut wv.inactive, &mut wv.hovered, &mut wv.open] { w.bg_stroke = Stroke::new(1.5_f32, ACCENT); }
-                    ui.menu_button(egui::RichText::new(name).size(14.0), |ui| {
+                    ui.menu_button(egui::RichText::new(name).size(13.0), |ui| {
                         ui.horizontal(|ui| { ui.label("Name:"); ui.text_edit_singleline(&mut self.mix.name); });
                         ui.separator();
                         if ui.button("New mix").clicked() { self.new_project(); ui.close_menu(); }
@@ -806,9 +778,9 @@ impl App {
                     });
                 });
                 let mid = ui.max_rect().center().x; let cur = ui.cursor().min.x; ui.add_space((mid - 200.0 - cur).max(10.0));
-                egui::Frame::none().fill(C::from_rgb(28, 29, 33)).rounding(8.0).inner_margin(3.0).show(ui, |ui| { ui.horizontal(|ui| {
-                    for (k, n) in [(1, "☰ Playlist"), (2, "|||\\ Library"), (3, "〰 Studio")] {
-                        if seg_button(ui, n, self.top == k).clicked() { self.top = k; if k == 1 { self.tab = Tab::Playlist; } if k == 2 { self.tab = Tab::Library; } }
+                egui::Frame::none().fill(CTRL_FILL).rounding(7.0).inner_margin(2.0).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| { ui.horizontal(|ui| {
+                    for (k, n) in [(1, "Playlist"), (2, "Library"), (3, "Studio")] {
+                        if theme::seg_button(ui, n, self.top == k).clicked() { self.top = k; if k == 1 { self.tab = Tab::Playlist; } if k == 2 { self.tab = Tab::Library; } }
                     } }); });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.menu_button("⚙", |ui| {
@@ -822,7 +794,7 @@ impl App {
                         ui.label(egui::RichText::new(if ep.is_empty() { "Inference: not started yet (CUDA if available, else CPU)".to_string() } else { format!("Inference: {ep}") }).color(DIM).size(11.0));
                     });
                     ui.add(egui::Button::new("?").min_size(vec2(28.0, 28.0))).on_hover_text("Space = play/pause · Ctrl+scroll = zoom · scroll = pan · Ctrl+Z = undo · Delete = remove track · drop audio files on the window");
-                    if ui.add(egui::Button::new("Export").min_size(vec2(60.0, 28.0))).on_hover_text("Export the whole mix (format in the Master tab)").clicked() { self.dialog(true, 2); }
+                    if ui.add(egui::Button::new(egui::RichText::new("Export").size(13.0)).fill(FOCUS).stroke(Stroke::NONE).min_size(vec2(72.0, 28.0))).on_hover_text("Export the whole mix (format in the Master tab)").clicked() { self.dialog(true, 2); }
                 });
             });
         });
@@ -839,20 +811,20 @@ impl App {
     fn tab_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("tabs").exact_height(40.0).frame(egui::Frame::none().fill(PANEL).inner_margin(6.0)).show(ctx, |ui| {
             egui::ScrollArea::horizontal().id_salt("bottom_tab_scroll").show(ui,|ui| { ui.horizontal_centered(|ui| {
-                let tabs = [(Tab::Zoom, "🔍 Zoom"), (Tab::Library, "📚 Library"), (Tab::Playlist, "☰ Playlist"), (Tab::Transition, "🔀 Transition"), (Tab::Track, "♫ Track"), (Tab::Grid, "⊞ Beatgrid"), (Tab::Compare, "Compare"), (Tab::Video, "🎥 Video"), (Tab::Effects, "✨ Effects"), (Tab::Master, "🔊 Master"), (Tab::Samples, "⚙ Samples")];
-                ui.add_space((ui.available_width() / 2.0 - 460.0).max(0.0));
-                egui::Frame::none().fill(C::from_rgb(28, 29, 33)).rounding(8.0).inner_margin(3.0).show(ui, |ui| { ui.horizontal(|ui| {
-                    for (t, n) in tabs { if seg_button(ui, n, self.tab == t).clicked() { self.tab = t; } } }); });
+                let tabs = [(Tab::Zoom, "Zoom"), (Tab::Library, "Library"), (Tab::Playlist, "Playlist"), (Tab::Transition, "Transition"), (Tab::Track, "Track"), (Tab::Grid, "Beatgrid"), (Tab::Compare, "Compare"), (Tab::Effects, "Effects"), (Tab::Master, "Master"), (Tab::Samples, "Samples")];
+                ui.add_space((ui.available_width() / 2.0 - 420.0).max(0.0));
+                egui::Frame::none().fill(CTRL_FILL).rounding(7.0).inner_margin(2.0).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| { ui.horizontal(|ui| {
+                    for (t, n) in tabs { if theme::seg_button(ui, n, self.tab == t).clicked() { self.tab = t; } } }); });
             }); });
         });
     }
 
     fn transport(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("transport").exact_height(46.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(10.0, 6.0))).show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("transport").exact_height(56.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(12.0, 8.0)).stroke(Stroke::new(1.0_f32, LINE_SOFT))).show(ctx, |ui| {
             ui.horizontal_centered(|ui| {
                 let circ = |ui: &mut egui::Ui, t: &str, fill: C, fg: C, tip: &str| ui.add(egui::Button::new(egui::RichText::new(t).color(fg).size(16.0)).fill(fill).rounding(16.0).min_size(vec2(32.0, 32.0)).stroke(Stroke::new(1.0_f32, if fg == ACCENT { ACCENT } else { LINE }))).on_hover_text(tip);
                 if circ(ui, "+", PANEL, ACCENT, "Add tracks (mp3, wav, flac, ogg, m4a)").clicked() { self.pick_files(None); }
-                if ui.add(egui::Button::new(egui::RichText::new("Auto-order").color(C::BLACK).size(14.0)).fill(ACCENT).rounding(16.0).min_size(vec2(96.0, 30.0))).on_hover_text("Reorder the playlist for smooth key (Camelot) and tempo transitions. Locked tracks stay put. Undo restores the old order.").clicked() { self.auto_order(); }
+                if ui.add(egui::Button::new(egui::RichText::new("Auto-order").color(ON_LIVE).size(13.0)).fill(ACCENT).rounding(16.0).min_size(vec2(104.0, 30.0))).on_hover_text("Reorder the playlist for smooth key (Camelot) and tempo transitions. Locked tracks stay put. Undo restores the old order.").clicked() { self.auto_order(); }
                 ui.menu_button("⏷", |ui| { ui.label(egui::RichText::new("Auto-order").strong());
                     for m in crate::automix::Mode::ALL { ui.radio_value(&mut self.ao_mode, m, m.name()); }
                     ui.separator(); ui.label(egui::RichText::new("Energy").color(DIM));
@@ -881,7 +853,7 @@ impl App {
                 if flat(ui, "⏪", "To start").clicked() { self.seek(0.0); }
                 if circ(ui, "⏺", C::from_rgb(50, 52, 58), C::from_rgb(230, 40, 40), "Record: export the mix").clicked() { self.dialog(true, 2); }
                 let pl = self.playing();
-                if ui.add(egui::Button::new(egui::RichText::new(if pl { "⏸" } else { "▶" }).color(C::BLACK).size(18.0)).fill(ACCENT).rounding(18.0).min_size(vec2(38.0, 36.0))).on_hover_text("Play/pause (space)").clicked() { self.toggle_playback(); }
+                if ui.add(egui::Button::new(egui::RichText::new(if pl { "⏸" } else { "▶" }).color(ON_LIVE).size(18.0)).fill(ACCENT).rounding(18.0).min_size(vec2(38.0, 36.0))).on_hover_text("Play/pause (space)").clicked() { self.toggle_playback(); }
                 let lb = egui::Button::new(egui::RichText::new("🔁").size(16.0).color(if self.loop_on { ACCENT } else { TXT })).frame(false).min_size(vec2(30.0, 30.0));
                 if ui.add(lb).on_hover_text("Loop the selected section, or the bar length from the current bar").clicked() { self.stop_comparison(); self.stop_transition_audition(); self.loop_on = !self.loop_on;
                     let s = (b / 4.0).floor() * 4.0; self.set_loop(if self.loop_on { Some(self.section_range.map(|(_,a,b)| (a,b)).unwrap_or((s, s + self.bars as f64 * 4.0))) } else { None }); }
@@ -889,8 +861,7 @@ impl App {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.add(egui::Button::new("⌨").min_size(vec2(30.0, 28.0))).on_hover_text("Space: play · Ctrl+scroll: zoom · Scroll: pan · Delete: remove · Ctrl+Z / Ctrl+Shift+Z");
                     let mo = self.mix.metronome;
-                    if ui.add(egui::Button::new(egui::RichText::new("A").strong().color(if mo { C::BLACK } else { TXT })).fill(if mo { ACCENT } else { C::from_rgb(52, 54, 60) }).min_size(vec2(30.0, 28.0))).on_hover_text("Metronome: click on mix beats, accented on the downbeat (never exported). Volume in the Master tab.").clicked() { self.mix.metronome = !mo; }
-                    ui.add(egui::Button::new("🎧").min_size(vec2(30.0, 28.0))).on_hover_text("Headphone cue (v2)");
+                    if ui.add(egui::Button::new(egui::RichText::new("A").strong().color(if mo { ON_LIVE } else { TXT })).fill(if mo { ACCENT } else { CTRL_FILL }).min_size(vec2(30.0, 28.0))).on_hover_text("Metronome: click on mix beats, accented on the downbeat (never exported). Volume in the Master tab.").clicked() { self.mix.metronome = !mo; }
                     if ui.add(egui::Button::new(if self.lock { "🔒" } else { "🔓" }).min_size(vec2(30.0, 28.0))).on_hover_text("Lock tracks so they can't be dragged").clicked() { self.lock = !self.lock; }
                     let n = match self.snapping { Snapping::Off => "Off", Snapping::Free => "Free", Snapping::Half => "Half", Snapping::Full => "Full" };
                     egui::ComboBox::from_id_salt("snap").width(60.0).selected_text(n).show_ui(ui, |ui| {
@@ -1354,7 +1325,8 @@ impl App {
             let sel = self.fx_sel == Some(k);
             tp.rect_filled(r, 3.0, col.gamma_multiply(if sel { 1.0 } else { 0.75 })); if sel { tp.rect_stroke(r, 3.0, Stroke::new(1.5_f32, C::WHITE)); }
             if r.width() > 30.0 { tp.text(pos2(r.left() + 4.0, r.center().y), Align2::LEFT_CENTER, fb.kind.name(), FontId::proportional(9.0), C::BLACK); }
-            if fb.kind == crate::fx::FxKind::Scratch { if let Ok(p) = crate::scratch::parse(&fb.pattern) { let pl = p.len() as f64; let mut b = fb.start + pl;
+            if fb.kind == crate::fx::FxKind::Scratch {
+                if let Ok(p) = crate::scratch::parse(&fb.pattern) { let pl = p.len() as f64; let mut b = fb.start + pl;
                 while b < fb.start + fb.len - 1e-6 { let x = bx(b); if x > r.left() && x < r.right() { for k in 0..4 { let y = r.top() + 1.0 + k as f32 * 3.5; tp.line_segment([pos2(x, y), pos2(x, y + 2.0)], Stroke::new(1.5_f32, C::BLACK)); } tp.text(pos2(x + 2.0, r.center().y), Align2::LEFT_CENTER, "↻", FontId::proportional(9.0), C::BLACK); } b += pl; } } }
             let resp = ui.interact(r, ui.id().with(("fx", k)), Sense::click_and_drag());
             let mut edge = 0u8;
@@ -1745,7 +1717,6 @@ impl App {
             Tab::Zoom => { ui.heading("Zoom"); ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).text("pixels per beat"));
                 if ui.button("Fit whole mix").clicked() { self.ppb = (ui.available_width() / self.mix.length_beats().max(64.0) as f32).max(0.3); self.scroll = 0.0; }
                 ui.label(dim("Tip: Ctrl + scroll zooms around the pointer, scroll moves in time.")); }
-            Tab::Video => { ui.heading("Video"); ui.label(dim("Video is not supported in v1.")); }
             Tab::Effects => self.effects_tab(ui),
             Tab::Master => { egui::ScrollArea::vertical().id_salt("master_settings").show(ui,|ui| {ui.heading("Master"); let mut b = self.mix.bpm;
                 ui.horizontal(|ui| { ui.label("Mix tempo"); if ui.add(egui::DragValue::new(&mut b).range(60.0..=200.0).speed(0.1).suffix(" BPM")).changed() { self.mix.bpm = b; } });
@@ -2085,11 +2056,11 @@ fn chip(ui: &mut egui::Ui, text: impl Into<String>, col: C) {
 }
 /// Framed on/off button for filters, visible in both states.
 fn toggle_button(ui: &mut egui::Ui, on: &mut bool, text: &str) -> egui::Response {
-    let r = ui.add(egui::Button::new(egui::RichText::new(text).color(if *on { ACCENT } else { TXT })).selected(*on));
+    let r = ui.add(egui::Button::new(egui::RichText::new(text).color(if *on { TXT } else { DIM })).fill(if *on { FOCUS_SOFT } else { C::TRANSPARENT }).selected(*on));
     if r.clicked() { *on = !*on; }
     r
 }
-fn compat_col(c: u8) -> C { match c { 0 => C::from_rgb(90, 200, 110), 1 => C::from_rgb(230, 200, 60), _ => C::from_rgb(230, 80, 70) } }
+fn compat_col(c: u8) -> C { match c { 0 => OK, 1 => WARN, _ => DANGER } }
 
 #[derive(Clone)]
 struct LibDrag(Vec<String>);
