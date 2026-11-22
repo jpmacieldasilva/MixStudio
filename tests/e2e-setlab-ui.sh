@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# Verifica o tema SetLab e ausência de UI morta (aba Video, cue v2).
+# E2E: shell SetLab (sidebar + toolbar + transport) e telas principais.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 export LIBRARY_PATH="${LIBRARY_PATH:-/usr/lib/gcc/x86_64-linux-gnu/12}"
 export CXX="${CXX:-g++}"
 export CC="${CC:-gcc}"
+ART="/opt/cursor/artifacts"
+mkdir -p "$ART"
 
 cargo build --locked -q
-OUT="/opt/cursor/artifacts/mixstudio-setlab-ui-$(date +%Y%m%d).png"
-DEMO=/tmp/ms-e2e-setlab-ui
-rm -rf "$DEMO"
 
 ! rg -n 'Tab::Video|Headphone cue' src/app.rs
+test -f src/app/shell.rs
+rg -n 'shell_frame|shell_sidebar|shell_transport' src/app/shell.rs >/dev/null
 
-MIXSTUDIO_DEMO_TAB=library MIXSTUDIO_SCREENSHOT="$OUT" timeout 60 ./target/debug/mixstudio --demo "$DEMO" >/dev/null
+for tab in playlist library transition master; do
+  out="$ART/mixstudio-after-${tab}.png"
+  MIXSTUDIO_DEMO_TAB="$tab" MIXSTUDIO_SCREENSHOT="$out" timeout 60 ./target/debug/mixstudio --demo "/tmp/ms-e2e-$tab" >/dev/null
+  test -s "$out"
+done
 
-test -s "$OUT"
-echo "ok screenshot=$OUT"
+echo "ok artifact_dir=$ART"

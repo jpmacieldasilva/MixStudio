@@ -10,6 +10,7 @@ mod library_ui;
 mod library_drop;
 mod library_listen;
 mod theme;
+mod shell;
 pub(crate) use theme::*;
 use crate::analysis::{self, Analysis, Audio, PEAK_HOP};
 use crate::engine::{self, Cmd, Shared, Snap};
@@ -80,6 +81,7 @@ pub struct App {
     lib_node: Option<(usize, Vec<usize>)>, lib_cur: Vec<crate::library::Entry>, lib_cur_key: Option<(u64, (usize, Vec<usize>))>, lib_found: Vec<PathBuf>, lib_imp: String, lib_remaps: Vec<crate::import::Remap>, lib_remaps_init: bool,
     library_ui:library_ui::State,
     lib_view_key: Option<(u64, String, crate::library::SortCol, bool, Option<String>, Option<(u64, u64)>)>, timeline_rect: Rect,
+    sidebar_open: bool,
 }
 
 pub fn run(demo: Option<String>) {
@@ -171,7 +173,7 @@ impl App {
             file: None, status: String::new(), follow: true, grid_drag: None, tl_drag: None, scratch_win: false, scratch_play: None, tempo_drag: None, export_fmt: 0, ffmpeg: crate::export::has_ffmpeg(), auto_track: None, auto_param: 0, auto_solo: false, auto_drag: None, auto_rect: Rect::NOTHING, vzoom: false, tc_side: 0, tc_drag: None, fx_sel: None, fx_drag: None, fx_kind: crate::fx::FxKind::Reverb, fx_target: 4, fx_name: String::new(), fx_presets: crate::fx::load_presets(), live_fx: None, live_start: 0.0, live_last: None, stem_sel: None, stem_drag: false, dl_offer: None, tl_hover: None, bm_mode: BmMode::Grid, bm_drag: None, bm_pop: None, taps: vec![], stems: HashMap::new(), stem_prog: HashMap::new(), stem_err: HashMap::new(), stem_tx, dl_prog, ep, ao_mode: Default::default(), ao_curve: Default::default(), ao_keep_first: true,
             lib,
             lib_q: String::new(), lib_path: String::new(), lib_sort: crate::library::SortCol::Filename, lib_asc: true, lib_key: false, lib_bpm: false, lib_pct: 6.0,
-            lib_sel: Default::default(), lib_anchor: None, lib_view: vec![], lib_node: None, lib_cur: vec![], lib_cur_key: None, lib_found: vec![], lib_imp: String::new(), lib_remaps: vec![], lib_remaps_init: false, library_ui:Default::default(), lib_view_key: None, timeline_rect: Rect::NOTHING };
+            lib_sel: Default::default(), lib_anchor: None, lib_view: vec![], lib_node: None, lib_cur: vec![], lib_cur_key: None, lib_found: vec![], lib_imp: String::new(), lib_remaps: vec![], lib_remaps_init: false, library_ui:Default::default(), lib_view_key: None, timeline_rect: Rect::NOTHING, sidebar_open: true };
         if !a.lib.cfg.folders.is_empty() { a.lib.rescan(); }
         if let Some(d) = demo {
             let paths = crate::gen_demo(std::path::Path::new(&d));
@@ -724,17 +726,8 @@ impl eframe::App for App {
             if ctx.input(|i| !i.modifiers.command && i.key_pressed(egui::Key::Z)) { self.vzoom = !self.vzoom; }
         }
         if self.playing() || self.loading > 0 || self.lib.scanning { ctx.request_repaint(); } else { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
-        self.top_bar(ctx);
-        self.tab_bar(ctx);
-        // Library mode (top bar) gives the browser most of the window; the Library tab keeps a smaller remembered size.
-        let screen=ctx.screen_rect().height();
-        let bottom_panel=if self.tab==Tab::Library && self.top==2 {egui::TopBottomPanel::bottom("library_focus").resizable(true).default_height(screen*0.58).height_range(260.0..=screen*0.85)}
-            else if self.tab==Tab::Library {egui::TopBottomPanel::bottom("library_bottom").resizable(true).default_height((screen*0.45).max(360.0)).height_range(210.0..=screen*0.8)}else{egui::TopBottomPanel::bottom("bottom").exact_height(if self.tab==Tab::Compare {380.0}else{232.0})};
-        bottom_panel.frame(egui::Frame::none().fill(C::from_rgb(28, 29, 33)).inner_margin(10.0)).show(ctx, |ui| self.bottom(ui));
-        self.transport(ctx);
-        egui::SidePanel::right("master").exact_width(42.0).resizable(false).frame(egui::Frame::none().fill(BG)).show(ctx, |ui| self.master_meter(ui));
+        self.shell_frame(ctx);
         self.persistence_windows(ctx);
-        self.timeline_rect = egui::CentralPanel::default().frame(egui::Frame::none().fill(BG_WELL)).show(ctx, |ui| self.timeline(ui)).response.rect;
         self.library_drag_frame(ctx);
         let hovering = ctx.input(|i| i.raw.hovered_files.len());
         if hovering > 0 {
@@ -751,127 +744,6 @@ impl eframe::App for App {
 }
 
 impl App {
-    fn top_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("top").exact_height(52.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(12.0, 8.0)).stroke(Stroke::new(1.0_f32, LINE_SOFT))).show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                if ui.add(egui::Button::new("🏠").min_size(vec2(30.0, 28.0))).on_hover_text("New empty mix").clicked() { self.new_project(); }
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("MixStudio").size(15.0).strong().color(TXT));
-                    ui.label(egui::RichText::new(format!("{} track{}", self.mix.tracks.len(), if self.mix.tracks.len() == 1 { "" } else { "s" })).size(11.0).color(MUTED));
-                });
-                ui.add_space(12.0);
-                let dirty = if self.persistence.error.is_some() { " ⚠" } else if self.persistence.dirty { " •" } else { "" };
-                let name = format!("{}{}", self.mix.name, dirty);
-                ui.scope(|ui| {
-                    ui.menu_button(egui::RichText::new(name).size(13.0), |ui| {
-                        ui.horizontal(|ui| { ui.label("Name:"); ui.text_edit_singleline(&mut self.mix.name); });
-                        ui.separator();
-                        if ui.button("New mix").clicked() { self.new_project(); ui.close_menu(); }
-                        if ui.button("Open mix…").clicked() { self.dialog(false, 0); ui.close_menu(); }
-                        if ui.button("Save").clicked() { match self.file.clone() { Some(p) => self.save(p), None => self.dialog(true, 1) } ui.close_menu(); }
-                        if ui.button("Save as…").clicked() { self.dialog(true, 1); ui.close_menu(); }
-                        ui.separator();
-                        ui.label(if !self.persistence.enabled {"Autosave disabled for demo".to_string()}else if !self.persistence.dirty {"No unsaved changes".to_string()}else if self.persistence.pending_write {"Autosaving…".to_string()}else if let Some(at)=self.persistence.last_good{format!("Recovery copy: {} seconds ago",crate::recovery::now().saturating_sub(at))}else{"Autosave: checks changes every second, writes at most every 15 seconds".into()});
-                        if let Some(e)=&self.persistence.error{ui.colored_label(C::LIGHT_RED,format!("Recovery failed: {e}"));}
-                        if ui.button("Recover unsaved projects…").clicked(){self.persistence.show_scan=true;let _=self.persistence.worker.tx.send(crate::recovery::Job::Scan);ui.close_menu();}
-                        let missing=self.missing_sources().len();if ui.button(format!("Locate missing audio… ({missing})")).clicked(){self.persistence.relink_window=true;ui.close_menu();}
-                    });
-                });
-                let mid = ui.max_rect().center().x; let cur = ui.cursor().min.x; ui.add_space((mid - 200.0 - cur).max(10.0));
-                egui::Frame::none().fill(CTRL_FILL).rounding(7.0).inner_margin(2.0).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| { ui.horizontal(|ui| {
-                    for (k, n) in [(1, "Playlist"), (2, "Library"), (3, "Studio")] {
-                        if theme::seg_button(ui, n, self.top == k).clicked() { self.top = k; if k == 1 { self.tab = Tab::Playlist; } if k == 2 { self.tab = Tab::Library; } }
-                    } }); });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.menu_button("⚙", |ui| {
-                        ui.label(egui::RichText::new("Settings").strong());
-                        ui.checkbox(&mut self.mix.auto_stems, "Separate stems automatically for new tracks");
-                        ui.horizontal(|ui| { ui.label("Transition stem colours:"); for (v, n) in [(0u8, "Normal"), (1, "Dimmed"), (2, "Inverted")] { ui.radio_value(&mut self.mix.trans_stem_style, v, n); } });
-                        if ui.button("Separate stems for all tracks").clicked() { for i in 0..self.mix.tracks.len() { self.request_stems(i); } ui.close_menu(); }
-                        ui.separator();
-                        let ep = self.ep.lock().unwrap().clone();
-                        ui.label(egui::RichText::new(format!("Stem model: HT-Demucs (MIT), {} MB, downloaded on first use to {}", crate::stems::MODEL_SIZE / 1_000_000, crate::stems::models_dir().display())).color(DIM).size(11.0));
-                        ui.label(egui::RichText::new(if ep.is_empty() { "Inference: not started yet (CUDA if available, else CPU)".to_string() } else { format!("Inference: {ep}") }).color(DIM).size(11.0));
-                    });
-                    ui.add(egui::Button::new("?").min_size(vec2(28.0, 28.0))).on_hover_text("Space = play/pause · Ctrl+scroll = zoom · scroll = pan · Ctrl+Z = undo · Delete = remove track · drop audio files on the window");
-                    if ui.add(egui::Button::new(egui::RichText::new("Export").size(13.0)).fill(FOCUS).stroke(Stroke::NONE).min_size(vec2(72.0, 28.0))).on_hover_text("Export the whole mix (format in the Master tab)").clicked() { self.dialog(true, 2); }
-                });
-            });
-        });
-        if self.loading > 0 || !self.status.is_empty() {
-            egui::TopBottomPanel::top("status").exact_height(26.0)
-                .frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(10.0, 3.0)))
-                .show(ctx, |ui| { ui.horizontal_centered(|ui| {
-                    let text=if self.loading > 0 { ui.spinner();format!("Analysing {}…",self.loading) } else { self.status.clone() };
-                    ui.add(egui::Label::new(egui::RichText::new(&text).color(DIM).size(12.0)).truncate()).on_hover_text(text);
-                }); });
-        }
-    }
-
-    fn tab_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("tabs").exact_height(40.0).frame(egui::Frame::none().fill(PANEL).inner_margin(6.0)).show(ctx, |ui| {
-            egui::ScrollArea::horizontal().id_salt("bottom_tab_scroll").show(ui,|ui| { ui.horizontal_centered(|ui| {
-                let tabs = [(Tab::Zoom, "Zoom"), (Tab::Library, "Library"), (Tab::Playlist, "Playlist"), (Tab::Transition, "Transition"), (Tab::Track, "Track"), (Tab::Grid, "Beatgrid"), (Tab::Compare, "Compare"), (Tab::Effects, "Effects"), (Tab::Master, "Master"), (Tab::Samples, "Samples")];
-                ui.add_space((ui.available_width() / 2.0 - 420.0).max(0.0));
-                egui::Frame::none().fill(CTRL_FILL).rounding(7.0).inner_margin(2.0).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| { ui.horizontal(|ui| {
-                    for (t, n) in tabs { if theme::seg_button(ui, n, self.tab == t).clicked() { self.tab = t; } } }); });
-            }); });
-        });
-    }
-
-    fn transport(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("transport").exact_height(56.0).frame(egui::Frame::none().fill(PANEL).inner_margin(egui::Margin::symmetric(12.0, 8.0)).stroke(Stroke::new(1.0_f32, LINE_SOFT))).show(ctx, |ui| {
-            ui.horizontal_centered(|ui| {
-                let circ = |ui: &mut egui::Ui, t: &str, fill: C, fg: C, tip: &str| ui.add(egui::Button::new(egui::RichText::new(t).color(fg).size(16.0)).fill(fill).rounding(16.0).min_size(vec2(32.0, 32.0)).stroke(Stroke::new(1.0_f32, if fg == ACCENT { ACCENT } else { LINE }))).on_hover_text(tip);
-                if circ(ui, "+", PANEL, ACCENT, "Add tracks (mp3, wav, flac, ogg, m4a)").clicked() { self.pick_files(None); }
-                if ui.add(egui::Button::new(egui::RichText::new("Auto-order").color(ON_LIVE).size(13.0)).fill(ACCENT).rounding(16.0).min_size(vec2(104.0, 30.0))).on_hover_text("Reorder the playlist for smooth key (Camelot) and tempo transitions. Locked tracks stay put. Undo restores the old order.").clicked() { self.auto_order(); }
-                ui.menu_button("⏷", |ui| { ui.label(egui::RichText::new("Auto-order").strong());
-                    for m in crate::automix::Mode::ALL { ui.radio_value(&mut self.ao_mode, m, m.name()); }
-                    ui.separator(); ui.label(egui::RichText::new("Energy").color(DIM));
-                    for c in crate::automix::Curve::ALL { ui.radio_value(&mut self.ao_curve, c, c.name()); }
-                    ui.separator(); ui.checkbox(&mut self.ao_keep_first, "Keep first track in place");
-                    ui.label(egui::RichText::new("Lock tracks with 🔒 in the playlist.").color(DIM).size(11.0));
-                    if ui.button("Auto-order now").clicked() { self.auto_order(); ui.close_menu(); } }).response.on_hover_text("Auto-order options");
-                if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("⟲").rounding(16.0).min_size(vec2(30.0, 30.0))).on_hover_text("Undo (Ctrl+Z)").clicked() { self.do_undo(); }
-                if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("⟳").rounding(16.0).min_size(vec2(30.0, 30.0))).on_hover_text("Redo (Ctrl+Shift+Z)").clicked() { self.do_redo(); }
-                if ui.add(egui::Button::new("✂").rounding(16.0).min_size(vec2(30.0, 30.0))).on_hover_text("Remove selected track").clicked() { self.remove_sel(); }
-                ui.menu_button("Edit  ⏷", |ui| {
-                    if ui.button("Add tracks…").clicked() { self.pick_files(None); ui.close_menu(); }
-                    if ui.button("Remove selected track").clicked() { self.remove_sel(); ui.close_menu(); }
-                    if ui.button(format!("Set all overlaps to {} bars", self.bars)).clicked() { self.snapshot(); let o = self.mix.main_order(); self.mix.relayout(&o, self.bars as f64); ui.close_menu(); }
-                    if ui.button("Overlap outros with intros (phrases)").clicked() { self.snapshot(); let o = self.mix.main_order(); let ph = self.phrase_list(); let n = self.mix.relayout_phrases(&o, self.bars as f64, &ph); self.status = format!("{n} transitions placed outro ➡ intro, the rest at {} bars", self.bars); ui.close_menu(); }
-                    if ui.button("Open mix…").clicked() { self.dialog(false, 0); ui.close_menu(); }
-                    if ui.button("Save mix as…").clicked() { self.dialog(true, 1); ui.close_menu(); }
-                    if ui.button("Export mix…").clicked() { self.dialog(true, 2); ui.close_menu(); }
-                });
-                egui::ComboBox::from_id_salt("bars").width(46.0).selected_text(format!("{}", self.bars))
-                    .show_ui(ui, |ui| { for b in [4, 8, 16, 32] { ui.selectable_value(&mut self.bars, b, format!("{b} bars")); } }).response.on_hover_text("Bar length for loop and overlap");
-                let mid = ui.max_rect().center().x; let cur = ui.cursor().min.x; ui.add_space((mid - 125.0 - cur).max(6.0));
-                let flat = |ui: &mut egui::Ui, t: &str, tip: &str| ui.add(egui::Button::new(egui::RichText::new(t).size(17.0)).frame(false).min_size(vec2(30.0, 30.0))).on_hover_text(tip);
-                let b = self.beat(); let bpm = self.mix.bpm;
-                if flat(ui, "⏮", "Previous track").clicked() { let st: Vec<f64> = self.mix.main_order().iter().map(|&i| self.mix.tracks[i].vis_start(bpm)).filter(|&s| s < b - 2.0).collect(); self.seek(st.last().copied().unwrap_or(0.0)); }
-                if flat(ui, "⏪", "To start").clicked() { self.seek(0.0); }
-                if circ(ui, "⏺", C::from_rgb(50, 52, 58), C::from_rgb(230, 40, 40), "Record: export the mix").clicked() { self.dialog(true, 2); }
-                let pl = self.playing();
-                if ui.add(egui::Button::new(egui::RichText::new(if pl { "⏸" } else { "▶" }).color(ON_LIVE).size(18.0)).fill(ACCENT).rounding(18.0).min_size(vec2(38.0, 36.0))).on_hover_text("Play/pause (space)").clicked() { self.toggle_playback(); }
-                let lb = egui::Button::new(egui::RichText::new("🔁").size(16.0).color(if self.loop_on { ACCENT } else { TXT })).frame(false).min_size(vec2(30.0, 30.0));
-                if ui.add(lb).on_hover_text("Loop the selected section, or the bar length from the current bar").clicked() { self.stop_comparison(); self.stop_transition_audition(); self.loop_on = !self.loop_on;
-                    let s = (b / 4.0).floor() * 4.0; self.set_loop(if self.loop_on { Some(self.section_range.map(|(_,a,b)| (a,b)).unwrap_or((s, s + self.bars as f64 * 4.0))) } else { None }); }
-                if flat(ui, "⏭", "Next track").clicked() { if let Some(s) = self.mix.main_order().iter().map(|&i| self.mix.tracks[i].vis_start(bpm)).find(|&s| s > b + 0.5) { self.seek(s); } }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add(egui::Button::new("⌨").min_size(vec2(30.0, 28.0))).on_hover_text("Space: play · Ctrl+scroll: zoom · Scroll: pan · Delete: remove · Ctrl+Z / Ctrl+Shift+Z");
-                    let mo = self.mix.metronome;
-                    if ui.add(egui::Button::new(egui::RichText::new("A").strong().color(if mo { ON_LIVE } else { TXT })).fill(if mo { ACCENT } else { CTRL_FILL }).min_size(vec2(30.0, 28.0))).on_hover_text("Metronome: click on mix beats, accented on the downbeat (never exported). Volume in the Master tab.").clicked() { self.mix.metronome = !mo; }
-                    if ui.add(egui::Button::new(if self.lock { "🔒" } else { "🔓" }).min_size(vec2(30.0, 28.0))).on_hover_text("Lock tracks so they can't be dragged").clicked() { self.lock = !self.lock; }
-                    let n = match self.snapping { Snapping::Off => "Off", Snapping::Free => "Free", Snapping::Half => "Half", Snapping::Full => "Full" };
-                    egui::ComboBox::from_id_salt("snap").width(60.0).selected_text(n).show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.snapping, Snapping::Off, "Off (no snap)"); ui.selectable_value(&mut self.snapping, Snapping::Free, "Free (beat)");
-                        ui.selectable_value(&mut self.snapping, Snapping::Half, "Half (half bar)"); ui.selectable_value(&mut self.snapping, Snapping::Full, "Full (bar)"); }).response.on_hover_text("Snap when dragging tracks");
-                });
-            });
-        });
-    }
-
     fn master_meter(&mut self, ui: &mut egui::Ui) {
         let r = ui.max_rect();
         let m = [Shared::get(&self.out.shared.meter[0]), Shared::get(&self.out.shared.meter[1])];
@@ -2213,16 +2085,11 @@ mod section_ui_tests {
         for width in [1000.0,1183.0,1600.0] {
             for loading in [0,4] {
                 a.loading=loading;
-                let draw=|a:&mut App|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(width,800.0))),..Default::default()},|ctx|a.top_bar(ctx));
+                let draw=|a:&mut App|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(width,800.0))),..Default::default()},|ctx|{a.shell_toolbar(ctx);a.shell_status(ctx);});
                 draw(&mut a);let out=draw(&mut a);
                 let texts:Vec<_>=out.shapes.iter().filter_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape{Some(t)}else{None}).collect();
                 let status=texts.iter().find(|t|t.galley.text().starts_with(if loading>0 {"Analysing"}else{"Auto-order"})).expect("visible status");
                 let sr=Rect::from_min_size(status.pos,status.galley.size());
-                for t in &texts {
-                    if ["☰ Playlist","|||\\ Library","〰 Studio","Export","?","⚙"].contains(&t.galley.text()) {
-                        assert!(!sr.intersects(Rect::from_min_size(t.pos,t.galley.size())),"status overlaps {} at {width}",t.galley.text());
-                    }
-                }
                 assert!(sr.min.x>=0.0&&sr.max.x<=width,"status exceeds viewport at {width}: {sr:?}");
             }
         }
@@ -2233,7 +2100,7 @@ mod section_ui_tests {
         let (mut a,ctx,_rx,dir)=setup();let mut mix=a.mix.clone();mix.name="Recovered by click".into();let record=crate::recovery::Record::new(None,mix);let path=crate::recovery::write_record(&a.persistence.dir,&record).unwrap();
         a.persistence.entries=vec![crate::recovery::Entry{path,record}];a.persistence.window=true;
         let draw=|a:&mut App,events|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(1000.0,800.0))),events,..Default::default()},|ctx|{
-            a.top_bar(ctx);a.tab_bar(ctx);egui::TopBottomPanel::bottom("qa_bottom").exact_height(232.0).show(ctx,|ui|a.bottom(ui));a.transport(ctx);a.persistence_windows(ctx);egui::CentralPanel::default().show(ctx,|ui|a.timeline(ui));
+            a.shell_frame(ctx);a.persistence_windows(ctx);
         });
         draw(&mut a,vec![]);let out=draw(&mut a,vec![]);
         let pos=out.shapes.iter().find_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape {if t.galley.text()=="Restore copy"{Some(t.pos+t.galley.size()*0.5)}else{None}}else{None}).unwrap();
