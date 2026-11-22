@@ -1,9 +1,9 @@
 //! SetLab-inspired application shell: sidebar, toolbar, inspector chrome, transport.
 
 use super::*;
-use eframe::egui::{self, pos2, vec2, Align2, FontId, Margin, Sense};
+use eframe::egui::{self, vec2, Margin};
 
-const SIDEBAR_W: f32 = 232.0;
+const SIDEBAR_W: f32 = 300.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ShellView {
@@ -109,46 +109,16 @@ impl App {
       )
       .show(ctx, |ui| {
         ui.add_space(4.0);
-        sidebar_heading(ui, "Project");
-        if sidebar_item(ui, "Current mix", self.shell_view() == ShellView::Arrange, self.mix.tracks.len(), false).clicked() {
-          self.top = 3;
-          self.tab = Tab::Playlist;
+        self.studio_sidebar_body(ui);
+        if self.shell_view() == ShellView::Arrange {
+          ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            self.shell_sidebar_status(ui);
+          });
         }
-        if sidebar_item(ui, "New mix", false, None, false).clicked() {
-          self.new_project();
-        }
-        ui.add_space(6.0);
-        sidebar_heading(ui, "Views");
-        if sidebar_item(ui, "Arrangement", self.shell_view() == ShellView::Arrange, None, self.playing()).clicked() {
-          self.top = 3;
-        }
-        let lib_n = self.lib.index.entries.len();
-        if sidebar_item(ui, "Library", self.shell_view() == ShellView::Library, Some(lib_n), self.listen.is_some()).clicked() {
-          self.top = 2;
-          self.tab = Tab::Library;
-        }
-        ui.add_space(6.0);
-        sidebar_heading(ui, "Inspector");
-        let fade = self.shell_view() == ShellView::Library && self.tab == Tab::Library;
-        ui.add_enabled_ui(!fade, |ui| {
-          for link in INSPECTOR_LINKS {
-            if link.tab == Tab::Library {
-              continue;
-            }
-            let on = self.tab == link.tab && self.shell_view() == ShellView::Arrange;
-            if sidebar_item(ui, link.label, on, None, false).on_hover_text(link.hint).clicked() {
-              self.top = 3;
-              self.tab = link.tab;
-            }
-          }
-        });
-        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-          self.shell_sidebar_footer(ui);
-        });
       });
   }
 
-  fn shell_sidebar_footer(&mut self, ui: &mut egui::Ui) {
+  fn shell_sidebar_status(&mut self, ui: &mut egui::Ui) {
     egui::Frame::none()
       .fill(ROW)
       .rounding(6.0)
@@ -217,42 +187,91 @@ impl App {
               .color(MUTED),
             );
           });
-          ui.menu_button(egui::RichText::new("▾").size(12.0).color(DIM), |ui| {
-              ui.horizontal(|ui| {
-                ui.label("Name:");
-                ui.text_edit_singleline(&mut self.mix.name);
-              });
-              ui.separator();
-              if ui.button("New mix").clicked() {
-                self.new_project();
-                ui.close_menu();
+          ui.menu_button(egui::RichText::new("Mix").size(13.0), |ui| {
+            ui.label(egui::RichText::new("Project").strong());
+            ui.horizontal(|ui| {
+              ui.label("Name:");
+              ui.text_edit_singleline(&mut self.mix.name);
+            });
+            if ui.button("New mix").clicked() {
+              self.new_project();
+              ui.close_menu();
+            }
+            if ui.button("Open mix…").clicked() {
+              self.dialog(false, 0);
+              ui.close_menu();
+            }
+            if ui.button("Save").clicked() {
+              match self.file.clone() {
+                Some(p) => self.save(p),
+                None => self.dialog(true, 1),
               }
-              if ui.button("Open mix…").clicked() {
-                self.dialog(false, 0);
-                ui.close_menu();
+              ui.close_menu();
+            }
+            if ui.button("Save as…").clicked() {
+              self.dialog(true, 1);
+              ui.close_menu();
+            }
+            ui.separator();
+            if ui.button("Recover unsaved projects…").clicked() {
+              self.persistence.show_scan = true;
+              let _ = self.persistence.worker.tx.send(crate::recovery::Job::Scan);
+              ui.close_menu();
+            }
+            let missing = self.missing_sources().len();
+            if ui.button(format!("Locate missing audio… ({missing})")).clicked() {
+              self.persistence.relink_window = true;
+              ui.close_menu();
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("Edit").strong());
+            for m in crate::automix::Mode::ALL {
+              ui.radio_value(&mut self.ao_mode, m, m.name());
+            }
+            for c in crate::automix::Curve::ALL {
+              ui.radio_value(&mut self.ao_curve, c, c.name());
+            }
+            ui.checkbox(&mut self.ao_keep_first, "Keep first track");
+            if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("Undo")).clicked() {
+              self.do_undo();
+              ui.close_menu();
+            }
+            if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("Redo")).clicked() {
+              self.do_redo();
+              ui.close_menu();
+            }
+            if ui.button("Add tracks from disk…").clicked() {
+              self.pick_files(None);
+              ui.close_menu();
+            }
+            if ui.button("Remove selected track").clicked() {
+              self.remove_sel();
+              ui.close_menu();
+            }
+            if ui.button(format!("Set overlaps to {} bars", self.bars)).clicked() {
+              self.snapshot();
+              let o = self.mix.main_order();
+              self.mix.relayout(&o, self.bars as f64);
+              ui.close_menu();
+            }
+            ui.separator();
+            ui.label(egui::RichText::new("Library & settings").strong());
+            if ui.button("Manage library & sources…").clicked() {
+              self.top = 2;
+              self.tab = Tab::Library;
+              ui.close_menu();
+            }
+            if ui.button("Add music folder…").clicked() {
+              self.pick_folder();
+              ui.close_menu();
+            }
+            ui.checkbox(&mut self.mix.auto_stems, "Separate stems automatically");
+            if ui.button("Separate stems for all tracks").clicked() {
+              for i in 0..self.mix.tracks.len() {
+                self.request_stems(i);
               }
-              if ui.button("Save").clicked() {
-                match self.file.clone() {
-                  Some(p) => self.save(p),
-                  None => self.dialog(true, 1),
-                }
-                ui.close_menu();
-              }
-              if ui.button("Save as…").clicked() {
-                self.dialog(true, 1);
-                ui.close_menu();
-              }
-              ui.separator();
-              if ui.button("Recover unsaved projects…").clicked() {
-                self.persistence.show_scan = true;
-                let _ = self.persistence.worker.tx.send(crate::recovery::Job::Scan);
-                ui.close_menu();
-              }
-              let missing = self.missing_sources().len();
-              if ui.button(format!("Locate missing audio… ({missing})")).clicked() {
-                self.persistence.relink_window = true;
-                ui.close_menu();
-              }
+              ui.close_menu();
+            }
           });
           let mid = ui.max_rect().center().x;
           let cur = ui.cursor().min.x;
@@ -272,7 +291,7 @@ impl App {
                     self.tab = Tab::Playlist;
                   }
                 }
-                if theme::seg_button(ui, "Library", lib).clicked() {
+                if theme::seg_button(ui, "Library", lib).on_hover_text("Folders, imports and full table").clicked() {
                   self.top = 2;
                   self.tab = Tab::Library;
                 }
@@ -298,57 +317,16 @@ impl App {
             {
               self.auto_order();
             }
-            ui.menu_button(egui::RichText::new("Edit").size(13.0).color(DIM), |ui| {
-              ui.label(egui::RichText::new("Auto-order").strong());
-              for m in crate::automix::Mode::ALL {
-                ui.radio_value(&mut self.ao_mode, m, m.name());
-              }
-              ui.separator();
-              for c in crate::automix::Curve::ALL {
-                ui.radio_value(&mut self.ao_curve, c, c.name());
-              }
-              ui.checkbox(&mut self.ao_keep_first, "Keep first track");
-              ui.separator();
-              if ui.add_enabled(!self.undo.is_empty(), egui::Button::new("Undo")).clicked() {
-                self.do_undo();
-                ui.close_menu();
-              }
-              if ui.add_enabled(!self.redo.is_empty(), egui::Button::new("Redo")).clicked() {
-                self.do_redo();
-                ui.close_menu();
-              }
-              ui.separator();
-              if ui.button("Add tracks…").clicked() {
-                self.pick_files(None);
-                ui.close_menu();
-              }
-              if ui.button("Remove selected track").clicked() {
-                self.remove_sel();
-                ui.close_menu();
-              }
-              if ui.button(format!("Set overlaps to {} bars", self.bars)).clicked() {
-                self.snapshot();
-                let o = self.mix.main_order();
-                self.mix.relayout(&o, self.bars as f64);
-                ui.close_menu();
-              }
-            });
-            ui.menu_button("⚙", |ui| {
-              ui.label(egui::RichText::new("Settings").strong());
-              ui.checkbox(&mut self.mix.auto_stems, "Separate stems automatically");
-              if ui.button("Separate stems for all tracks").clicked() {
-                for i in 0..self.mix.tracks.len() {
-                  self.request_stems(i);
-                }
-                ui.close_menu();
-              }
-            });
           });
         });
       });
   }
 
   pub(super) fn shell_status(&mut self, ctx: &egui::Context) {
+    let only_loading = self.loading > 0 && self.status.is_empty();
+    if only_loading && self.sidebar_open && self.shell_view() == ShellView::Arrange {
+      return;
+    }
     if self.loading == 0 && self.status.is_empty() {
       return;
     }
@@ -371,7 +349,7 @@ impl App {
   }
 
   fn shell_inspector_header(&mut self, ui: &mut egui::Ui) {
-    let title = match self.tab {
+    let panel = match self.tab {
       Tab::Playlist => "Playlist",
       Tab::Library => "Library",
       Tab::Transition => "Transition",
@@ -384,22 +362,28 @@ impl App {
       Tab::Samples => "Samples",
     };
     ui.horizontal(|ui| {
-      ui.label(egui::RichText::new(title.to_uppercase()).size(10.5).color(MUTED).strong());
-      ui.add_space(8.0);
+      ui.label(egui::RichText::new("Inspector").size(10.5).color(MUTED).strong());
+      ui.label(egui::RichText::new(format!("· {panel}")).size(11.0).color(DIM));
+      ui.add_space(4.0);
       if let Some(i) = self.sel.or(self.sel_in).filter(|&i| i < self.mix.tracks.len()) {
         let t = &self.mix.tracks[i];
         ui.label(egui::RichText::new(format!("· {} — {}", t.title, t.key)).size(11.5).color(DIM));
       }
       ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        egui::Frame::none()
-          .fill(CTRL_FILL)
-          .rounding(6.0)
-          .inner_margin(2.0)
+        egui::ScrollArea::horizontal()
+          .id_salt("inspector_tabs")
+          .max_width(ui.available_width().min(520.0))
           .show(ui, |ui| {
             ui.horizontal(|ui| {
-              for link in INSPECTOR_LINKS.iter().take(6) {
-                if theme::seg_button(ui, link.label, self.tab == link.tab).clicked() {
+              for link in INSPECTOR_LINKS {
+                if link.tab == Tab::Library {
+                  continue;
+                }
+                if theme::seg_button(ui, link.label, self.tab == link.tab)
+                  .on_hover_text(link.hint)
+                  .clicked()
+                {
                   self.tab = link.tab;
                 }
               }
@@ -521,9 +505,6 @@ impl App {
               })
               .response
               .on_hover_text("Default transition length");
-            if ghost_icon_button(ui, "+", "Add tracks").clicked() {
-              self.pick_files(None);
-            }
             let lb = egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { ACCENT } else { DIM }))
               .fill(if self.loop_on { FOCUS_SOFT } else { C::TRANSPARENT })
               .stroke(if self.loop_on {
@@ -546,38 +527,6 @@ impl App {
         });
       });
   }
-}
-
-fn sidebar_heading(ui: &mut egui::Ui, title: &str) {
-  ui.label(egui::RichText::new(title.to_uppercase()).size(10.5).color(MUTED).strong());
-  ui.add_space(4.0);
-}
-
-fn sidebar_item(ui: &mut egui::Ui, label: &str, on: bool, count: impl Into<Option<usize>>, live: bool) -> egui::Response {
-  let count = count.into();
-  let fill = if on { ROW } else { C::TRANSPARENT };
-  let text_col = if live { ACCENT } else if on { TXT } else { DIM };
-  let h = 28.0;
-  let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), h), Sense::click());
-  if ui.is_rect_visible(rect) {
-    let p = ui.painter();
-    if response.hovered() && !on {
-      p.rect_filled(rect, 6.0, CTRL_HOVER);
-    } else if on {
-      p.rect_filled(rect, 6.0, fill);
-    }
-    p.text(pos2(rect.left() + 8.0, rect.center().y), Align2::LEFT_CENTER, label, FontId::proportional(13.0), text_col);
-    if let Some(c) = count {
-      p.text(
-        pos2(rect.right() - 8.0, rect.center().y),
-        Align2::RIGHT_CENTER,
-        format!("{c}"),
-        FontId::proportional(11.0),
-        if live { ACCENT } else { MUTED },
-      );
-    }
-  }
-  response
 }
 
 fn ghost_icon_button(ui: &mut egui::Ui, icon: &str, tip: &str) -> egui::Response {

@@ -12,12 +12,22 @@ cargo build --locked -q
 
 ! rg -n 'Tab::Video|Headphone cue' src/app.rs
 test -f src/app/shell.rs
-rg -n 'shell_frame|shell_sidebar|shell_transport' src/app/shell.rs >/dev/null
+test -f src/app/studio_nav.rs
+rg -n 'shell_frame|studio_sidebar_body|shell_transport' src/app/shell.rs >/dev/null
+rg -n 'studio_track_picker|LibDrag' src/app/studio_nav.rs >/dev/null
+
+STORE_MEDIA="${MIXSTUDIO_STORE_MEDIA:-}"
+mkdir -p "$STORE_MEDIA" 2>/dev/null || true
 
 for tab in playlist library transition master; do
-  out="$ART/mixstudio-after-${tab}.png"
+  name="$tab"
+  [[ "$tab" == "playlist" ]] && name="arrangement"
+  out="$ART/mixstudio-daw-${name}.png"
   MIXSTUDIO_DEMO_TAB="$tab" MIXSTUDIO_SCREENSHOT="$out" timeout 60 ./target/debug/mixstudio --demo "/tmp/ms-e2e-$tab" >/dev/null
   test -s "$out"
+  if [[ -n "$STORE_MEDIA" ]]; then
+    cp -f "$out" "$STORE_MEDIA/mixstudio-daw-${name}.png"
+  fi
 done
 
-echo "ok artifact_dir=$ART"
+echo "ok artifact_dir=$ART store_media=${STORE_MEDIA:-none}"

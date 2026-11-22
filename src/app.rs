@@ -11,6 +11,7 @@ mod library_drop;
 mod library_listen;
 mod theme;
 mod shell;
+mod studio_nav;
 pub(crate) use theme::*;
 use crate::analysis::{self, Analysis, Audio, PEAK_HOP};
 use crate::engine::{self, Cmd, Shared, Snap};
@@ -176,7 +177,12 @@ impl App {
             lib_sel: Default::default(), lib_anchor: None, lib_view: vec![], lib_node: None, lib_cur: vec![], lib_cur_key: None, lib_found: vec![], lib_imp: String::new(), lib_remaps: vec![], lib_remaps_init: false, library_ui:Default::default(), lib_view_key: None, timeline_rect: Rect::NOTHING, sidebar_open: true };
         if !a.lib.cfg.folders.is_empty() { a.lib.rescan(); }
         if let Some(d) = demo {
-            let paths = crate::gen_demo(std::path::Path::new(&d));
+            let demo_dir = std::path::Path::new(&d);
+            let paths = crate::gen_demo(demo_dir);
+            if demo_dir.is_dir() {
+                a.lib.add_folder(demo_dir);
+                a.lib.rescan();
+            }
             for p in &paths { if let Ok((au, an)) = analysis::load(p) { a.insert(p.clone(), au, an, None); } }
             let pr = [Preset::Crossfade, Preset::BassSwap, Preset::EchoOut, Preset::HighToLow];
             for (i, t) in a.mix.tracks.iter_mut().enumerate() { t.trans.preset = pr[i % 4]; t.trans.stems = [StemMode::Swap, StemMode::Swap, StemMode::Full, StemMode::Full]; t.artist = ["Kick Lab", "Pad Unit", "Low End", "Raver"][i % 4].into(); }

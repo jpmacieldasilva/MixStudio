@@ -66,6 +66,8 @@ fn node_ui(ui: &mut egui::Ui, n: &crate::import::Node, li: usize, path: &mut Vec
 pub(super) struct State {
     pub folder:Option<String>,pub details:bool,pub geometry:Option<library_drop::Geometry>,
     tree:Vec<crate::library::browse::FolderNode>,tree_key:Option<(u64,Vec<String>)>,
+    /// Studio sidebar: 0 = library picker, 1 = mix track list
+    pub side_tab:u8,
 }
 /// Full-width navigation row: name truncated to fit, count right-aligned.
 fn nav_row(ui:&mut egui::Ui,name:&str,count:usize,selected:bool)->egui::Response {
@@ -91,7 +93,7 @@ fn folder_node(ui:&mut egui::Ui,node:&crate::library::browse::FolderNode,current
         .show_header(ui,|ui|row(ui,selected,remove)).body(|ui|{for child in &node.children {folder_node(ui,child,current,selected,remove,false);}});}
 }
 impl App {
-    fn library_entries(&self)->&[crate::library::Entry] {if self.lib_node.is_some(){&self.lib_cur}else{&self.lib.index.entries}}
+    pub(super) fn library_entries(&self)->&[crate::library::Entry] {if self.lib_node.is_some(){&self.lib_cur}else{&self.lib.index.entries}}
     pub(super) fn library_selected_paths(&self)->Vec<String> {
         self.lib_view.iter().filter_map(|&i|self.library_entries().get(i)).filter(|e|self.lib_sel.contains(&e.path)).map(|e|e.path.clone()).collect()
     }
