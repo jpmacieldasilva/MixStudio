@@ -631,26 +631,71 @@ impl App {
             Err(e)=>self.status=e,
         }
     }
-    fn section_toolbar(&mut self, ui: &mut egui::Ui) {
+    pub(super) fn control_bar_edit(&mut self, ui: &mut egui::Ui) {
         self.validate_section();
-        let mut action=None;
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.select_sections,false,"↔ Move").on_hover_text("Drag clips to move them");
-            if ui.selectable_value(&mut self.select_sections,true,"▣ Select").on_hover_text("Drag a range on one song; uses the timeline's beat/bar snap").changed() { self.drag=None; self.auto_track=None; self.stem_sel=None; }
-            ui.separator();
-            let selected=self.section_range.is_some(); let unlocked=!self.arrangement_locked();
-            for (id,label,tip,enabled) in [
-                (0,"Copy","Ctrl+C · copy selected source ranges and automation",selected),
-                (1,"Paste","Ctrl+V · insert at playhead within the same song",unlocked && self.section_copy.is_some() && self.sel.is_some()),
-                (2,"Repeat","Ctrl+D · insert a copy directly after selection",unlocked && selected),
-                (3,"Delete + close gap","Delete · shorten song and move following material",unlocked && selected),
-                (4,"▶ Loop selection","Play the selected section repeatedly",selected),
-            ] { if ui.add_enabled(enabled,egui::Button::new(label)).on_hover_text(tip).clicked() {action=Some(id);} }
-            if selected { if ui.small_button("Clear").on_hover_text("Escape").clicked() { self.clear_section(); } }
-            if let Some((_,a,b))=self.section_range { ui.label(egui::RichText::new(format!("{:.1} beats / {:.2} bars · Ripple on",b-a,(b-a)/4.0)).color(ACCENT)); }
-            else { ui.label(egui::RichText::new(if self.select_sections {"Drag on a waveform to select · Ripple on"} else {"Select a range to edit a song"}).color(DIM)); }
+        let mut action = None;
+        egui::Frame::none()
+            .fill(CTRL_FILL)
+            .rounding(6.0)
+            .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+            .stroke(Stroke::new(1.0_f32, LINE_SOFT))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 2.0;
+                    if theme::seg_button(ui, "Move", !self.select_sections)
+                        .on_hover_text("Drag clips on the timeline")
+                        .clicked()
+                    {
+                        self.select_sections = false;
+                    }
+                    if theme::seg_button(ui, "Select", self.select_sections)
+                        .on_hover_text("Drag a range on one song (uses snap)")
+                        .clicked()
+                    {
+                        self.select_sections = true;
+                        self.drag = None;
+                        self.auto_track = None;
+                        self.stem_sel = None;
+                    }
+                });
+            });
+        ui.add_space(4.0);
+        let selected = self.section_range.is_some();
+        let unlocked = !self.arrangement_locked();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            for (id, label, tip, enabled) in [
+                (0, "Copy", "Ctrl+C", selected),
+                (1, "Paste", "Ctrl+V at playhead", unlocked && self.section_copy.is_some() && self.sel.is_some()),
+                (2, "Repeat", "Ctrl+D", unlocked && selected),
+                (3, "Delete", "Delete range · ripple", unlocked && selected),
+                (4, "Loop", "Loop selection", selected),
+            ] {
+                let r = ui.add_enabled(
+                    enabled,
+                    egui::Button::new(egui::RichText::new(label).size(11.0))
+                        .min_size(vec2(44.0, 26.0)),
+                );
+                if r.on_hover_text(tip).clicked() {
+                    action = Some(id);
+                }
+            }
+            if selected {
+                if ui.small_button("Clear").on_hover_text("Clear selection (Esc)").clicked() {
+                    self.clear_section();
+                }
+                if let Some((_, a, b)) = self.section_range {
+                    ui.label(
+                        egui::RichText::new(format!("{:.1}b", b - a))
+                            .size(11.0)
+                            .color(ACCENT),
+                    );
+                }
+            }
         });
-        if let Some(a)=action { self.section_action(a); }
+        if let Some(a) = action {
+            self.section_action(a);
+        }
     }
     fn snap_beat(&self, b: f64) -> f64 { match self.snapping { Snapping::Off => b, Snapping::Free => b.round(), Snapping::Half => (b / 2.0).round() * 2.0, Snapping::Full => (b / 4.0).round() * 4.0 } }
 }
@@ -814,7 +859,6 @@ impl App {
 impl App {
     fn timeline(&mut self, ui: &mut egui::Ui) {
         if self.arrangement_locked() {self.samples.copy=None;self.samples.box_origin=None;self.stem_volume_drag=None;self.drag=None;self.tl_drag=None;self.grid_drag=None;self.bm_drag=None;}
-        self.section_toolbar(ui);
         let full = ui.available_rect_before_wrap();
         let mini_h = 14.0;
         let mini = Rect::from_min_max(full.min, pos2(full.right(), full.top() + mini_h));

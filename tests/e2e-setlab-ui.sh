@@ -13,7 +13,7 @@ cargo build --locked -q
 ! rg -n 'Tab::Video|Headphone cue' src/app.rs
 test -f src/app/shell.rs
 test -f src/app/studio_nav.rs
-rg -n 'shell_frame|studio_sidebar_body|shell_transport' src/app/shell.rs >/dev/null
+rg -n 'shell_frame|studio_sidebar_body|shell_control_bar' src/app/shell.rs >/dev/null
 rg -n 'studio_track_picker|LibDrag' src/app/studio_nav.rs >/dev/null
 
 STORE_MEDIA="${MIXSTUDIO_STORE_MEDIA:-}"

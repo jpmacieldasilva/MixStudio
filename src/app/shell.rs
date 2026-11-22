@@ -74,7 +74,7 @@ impl App {
           self.bottom(ui);
         });
     }
-    self.shell_transport(ctx);
+    self.shell_control_bar(ctx);
     egui::SidePanel::right("master_meter")
       .exact_width(44.0)
       .resizable(false)
@@ -393,13 +393,16 @@ impl App {
     });
   }
 
-  fn shell_transport(&mut self, ctx: &egui::Context) {
-    egui::TopBottomPanel::bottom("transport")
-      .exact_height(56.0)
+  fn shell_control_bar(&mut self, ctx: &egui::Context) {
+    if self.shell_view() != ShellView::Arrange {
+      return;
+    }
+    egui::TopBottomPanel::bottom("control_bar")
+      .exact_height(60.0)
       .frame(
         egui::Frame::none()
           .fill(PANEL)
-          .inner_margin(Margin::symmetric(16.0, 8.0))
+          .inner_margin(Margin::symmetric(12.0, 6.0))
           .stroke(Stroke::new(1.0_f32, LINE_SOFT)),
       )
       .show(ctx, |ui| {
@@ -407,6 +410,11 @@ impl App {
         let bpm = self.mix.bpm;
         let bar = (b / 4.0).floor() as i64 + 1;
         ui.horizontal(|ui| {
+          ui.set_max_width(360.0);
+          self.control_bar_edit(ui);
+          ui.add_space(12.0);
+          ui.separator();
+          ui.add_space(8.0);
           ui.horizontal(|ui| {
             if ghost_icon_button(ui, "⏮", "Previous track").clicked() {
               let st: Vec<f64> = self
@@ -421,12 +429,12 @@ impl App {
             let pl = self.playing();
             if ui
               .add(
-                egui::Button::new(egui::RichText::new(if pl { "⏸" } else { "▶" }).color(ON_LIVE).size(17.0))
+                egui::Button::new(egui::RichText::new(if pl { "⏸" } else { "▶" }).color(ON_LIVE).size(16.0))
                   .fill(ACCENT)
                   .rounding(18.0)
-                  .min_size(vec2(36.0, 36.0)),
+                  .min_size(vec2(34.0, 34.0)),
               )
-              .on_hover_text("Play/pause (Space)")
+              .on_hover_text("Play / pause (Space)")
               .clicked()
             {
               self.toggle_playback();
@@ -443,22 +451,7 @@ impl App {
               }
             }
           });
-          ui.add_space(16.0);
-          ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.label(
-              egui::RichText::new(format!("{} · Bar {}", fmt_t(self.sec(b)), bar))
-                .size(15.0)
-                .color(TXT)
-                .strong(),
-            );
-            ui.label(
-              egui::RichText::new(format!("{:.1} BPM", bpm))
-                .size(11.0)
-                .color(MUTED),
-            );
-          });
-          ui.add_space(20.0);
+          ui.add_space(10.0);
           let now = self
             .sel
             .and_then(|i| self.mix.tracks.get(i))
@@ -466,53 +459,29 @@ impl App {
             .unwrap_or("—");
           ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            ui.label(egui::RichText::new(now).size(13.0).color(if self.playing() { ACCENT } else { TXT }));
-            ui.label(egui::RichText::new("Now in mix").size(11.0).color(MUTED));
+            ui.label(
+              egui::RichText::new(format!("{} · bar {bar} · {bpm:.1} BPM", fmt_t(self.sec(b))))
+                .size(13.5)
+                .color(TXT)
+                .strong(),
+            );
+            ui.label(
+              egui::RichText::new(now)
+                .size(11.0)
+                .color(if self.playing() { ACCENT } else { MUTED }),
+            );
           });
           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let n = match self.snapping {
-              Snapping::Off => "Snap off",
-              Snapping::Free => "Beat",
-              Snapping::Half => "½ bar",
-              Snapping::Full => "Bar",
-            };
-            egui::ComboBox::from_id_salt("snap_shell")
-              .width(72.0)
-              .selected_text(n)
-              .show_ui(ui, |ui| {
-                ui.selectable_value(&mut self.snapping, Snapping::Off, "Off");
-                ui.selectable_value(&mut self.snapping, Snapping::Free, "Beat");
-                ui.selectable_value(&mut self.snapping, Snapping::Half, "Half bar");
-                ui.selectable_value(&mut self.snapping, Snapping::Full, "Bar");
-              });
-            if ghost_icon_button(ui, if self.lock { "🔒" } else { "🔓" }, "Lock arrangement").clicked() {
-              self.lock = !self.lock;
-            }
-            let mo = self.mix.metronome;
-            let met = egui::Button::new(egui::RichText::new("Metronome").size(11.0).color(if mo { ON_LIVE } else { DIM }))
-              .fill(if mo { ACCENT.gamma_multiply(0.85) } else { CTRL_FILL })
-              .min_size(vec2(88.0, 26.0));
-            if ui.add(met).clicked() {
-              self.mix.metronome = !mo;
-            }
-            egui::ComboBox::from_id_salt("overlap_bars")
-              .width(64.0)
-              .selected_text(format!("{}b", self.bars))
-              .show_ui(ui, |ui| {
-                for bars in [4u32, 8, 16, 32] {
-                  ui.selectable_value(&mut self.bars, bars, format!("{bars} bars"));
-                }
-              })
-              .response
-              .on_hover_text("Default transition length");
+            ui.spacing_mut().item_spacing.x = 6.0;
             let lb = egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { ACCENT } else { DIM }))
               .fill(if self.loop_on { FOCUS_SOFT } else { C::TRANSPARENT })
               .stroke(if self.loop_on {
                 Stroke::new(1.0_f32, FOCUS)
               } else {
                 Stroke::NONE
-              });
-            if ui.add(lb).on_hover_text("Loop section or bar length").clicked() {
+              })
+              .min_size(vec2(46.0, 26.0));
+            if ui.add(lb).on_hover_text("Loop selection or bar length").clicked() {
               self.stop_comparison();
               self.stop_transition_audition();
               self.loop_on = !self.loop_on;
@@ -523,6 +492,44 @@ impl App {
                 None
               });
             }
+            egui::ComboBox::from_id_salt("overlap_bars")
+              .width(52.0)
+              .selected_text(format!("{}b", self.bars))
+              .show_ui(ui, |ui| {
+                for bars in [4u32, 8, 16, 32] {
+                  ui.selectable_value(&mut self.bars, bars, format!("{bars} beats overlap"));
+                }
+              })
+              .response
+              .on_hover_text("Default transition overlap");
+            let mo = self.mix.metronome;
+            let met = egui::Button::new(egui::RichText::new("Click").size(11.0).color(if mo { ON_LIVE } else { DIM }))
+              .fill(if mo { ACCENT.gamma_multiply(0.85) } else { CTRL_FILL })
+              .min_size(vec2(52.0, 26.0));
+            if ui.add(met).on_hover_text("Metronome").clicked() {
+              self.mix.metronome = !mo;
+            }
+            if ghost_icon_button(ui, if self.lock { "🔒" } else { "🔓" }, "Lock arrangement").clicked() {
+              self.lock = !self.lock;
+            }
+            if ghost_icon_button(ui, if self.follow { "◎" } else { "○" }, "Follow playhead while playing").clicked() {
+              self.follow = !self.follow;
+            }
+            let snap = match self.snapping {
+              Snapping::Off => "Off",
+              Snapping::Free => "Beat",
+              Snapping::Half => "½",
+              Snapping::Full => "Bar",
+            };
+            egui::ComboBox::from_id_salt("snap_shell")
+              .width(58.0)
+              .selected_text(snap)
+              .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.snapping, Snapping::Off, "Snap off");
+                ui.selectable_value(&mut self.snapping, Snapping::Free, "Beat");
+                ui.selectable_value(&mut self.snapping, Snapping::Half, "Half bar");
+                ui.selectable_value(&mut self.snapping, Snapping::Full, "Bar");
+              });
           });
         });
       });
