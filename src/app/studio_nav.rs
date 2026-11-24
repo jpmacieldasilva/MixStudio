@@ -261,22 +261,39 @@ impl App {
                     FontId::proportional(12.0),
                     if playing { ACCENT } else { TXT },
                 );
+                let artist = if t.artist.is_empty() { "Unknown artist" } else { t.artist.as_str() };
                 p.text(
                     pos2(rect.left() + 50.0, rect.bottom() - 14.0),
                     Align2::LEFT_BOTTOM,
-                    format!("Deck {} · bar {:.0}", t.lane + 1, t.start_beat / 4.0 + 1.0),
+                    artist,
                     FontId::proportional(10.0),
                     DIM,
                 );
                 p.text(
-                    pos2(rect.right() - 6.0, rect.center().y),
+                    pos2(rect.right() - 6.0, rect.center().y - 5.0),
                     Align2::RIGHT_CENTER,
-                    format!("{}.", k + 1),
+                    "In mix",
                     FontId::proportional(11.0),
+                    ACCENT,
+                );
+                p.text(
+                    pos2(rect.right() - 6.0, rect.center().y + 7.0),
+                    Align2::RIGHT_CENTER,
+                    format!("{:.1} BPM", t.bpm),
+                    FontId::proportional(10.0),
                     MUTED,
                 );
+                let _ = k;
             }
         });
+        let n = order.len();
+        let total = self.lib.index.entries.len();
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(format!("{n} tracks · {total} indexed"))
+                .size(11.0)
+                .color(DIM),
+        );
     }
 
     fn studio_nav_footer(&mut self, ui: &mut egui::Ui) {

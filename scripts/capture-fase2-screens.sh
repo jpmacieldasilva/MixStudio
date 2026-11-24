@@ -59,6 +59,7 @@ grid.convert("RGB").save(out)
 print("states grid",out,grid.size)
 PY
 
+export STORE PRANCHAS
 python3 - <<PY
 import os
 from PIL import Image

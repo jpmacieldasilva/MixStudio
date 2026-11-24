@@ -158,7 +158,7 @@ impl App {
         ui.add_space(2.0);
         ui.horizontal(|ui|{
             let n=self.lib_sel.len();let label=if n>1 {format!("Add {n} to Mix")} else {"Add to Mix".into()};
-            let add=egui::Button::new(egui::RichText::new(label).color(if n>0{C::BLACK}else{DIM})).fill(if n>0{ACCENT}else{PANEL}).min_size(vec2(110.0,26.0));
+            let add=egui::Button::new(egui::RichText::new(label).color(if n>0{BG}else{DIM})).fill(if n>0{ACCENT}else{CTRL_FILL}).stroke(Stroke::new(1.0, if n>0{ACCENT}else{LINE})).min_size(vec2(118.0,28.0));
             let width=(ui.available_width()-128.0).max(140.0);
             egui::Frame::none().fill(BG).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32,LINE)).inner_margin(egui::Margin::symmetric(8.0,3.0)).show(ui,|ui|{
                 ui.set_width(width-18.0);
@@ -174,8 +174,8 @@ impl App {
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui|{
             let ref_key = self.lib_ref().map(|(_, k, _)| k.clone()).unwrap_or_else(|| "—".into());
-            toggle_button(ui,&mut self.lib_key,&format!("Compatible with {ref_key}")).on_hover_text("Show harmonically compatible keys");
-            toggle_button(ui,&mut self.lib_bpm,"BPM ±6%").on_hover_text("Show tracks within tempo range of the selected mix track");
+            toggle_button(ui,&mut self.lib_key,"Compatible key").on_hover_text(format!("Show keys compatible with {ref_key}"));
+            toggle_button(ui,&mut self.lib_bpm,"BPM range").on_hover_text("Limit tracks to ± BPM range around the reference mix track");
             if !self.lib_bpm { self.lib_pct = 6.0; }
             ui.add_enabled(self.lib_bpm,egui::DragValue::new(&mut self.lib_pct).range(1.0..=30.0).speed(0.2).prefix("±").suffix(" %"));
             ui.add_space(8.0);

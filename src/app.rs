@@ -215,7 +215,7 @@ impl App {
             if let Some(&(_, _, s, e)) = a.mix.logical_transitions().first() { a.scroll = s - 40.0; a.seek((s + e) / 2.0 - 4.0); }
             a.ppb = 7.5; a.sel = Some(1); a.sel_in = None; a.tab = Tab::Track; a.mix.metronome = true; a.follow = true;
             match std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() {
-                Ok("arrangement") | Ok("track") => { a.top = 3; a.sel = Some(1); a.sel_in = None; a.tab = Tab::Track; }
+                Ok("arrangement") | Ok("track") => { a.top = 3; a.library_ui.side_tab = 1; a.sel = Some(1); a.sel_in = None; a.tab = Tab::Track; }
                 Ok("transition") => {
                     if let Some(&(_, i, s, e)) = a.mix.logical_transitions().first() {
                         a.sel_in = Some(i); a.sel = None; a.tab = Tab::Transition; a.scroll = s - 20.0; a.seek((s + e) * 0.5);
@@ -225,8 +225,11 @@ impl App {
                 Ok("library") => {
                     a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_key = true; a.lib_bpm = true; a.lib_pct = 6.0;
                     a.refresh_library_view();
+                    a.lib_sort = crate::library::SortCol::Title;
+                    a.refresh_library_view();
                     let pick: Vec<_> = a.lib_view.iter().take(2).filter_map(|&i| a.library_entries().get(i).map(|e| e.path.clone())).collect();
-                    for path in pick { a.lib_sel.insert(path); }
+                    a.lib_sel = pick.iter().cloned().collect();
+                    a.lib_anchor = pick.first().cloned();
                 }
                 // Preview a demo file, paused so a screenshot makes no sound.
                 Ok("listen") => { a.top = 2; a.tab = Tab::Library; a.sel = None; let p=a.mix.tracks[0].path.clone(); a.toggle_listen(p,"Kick Test A minor.wav".into(),ctx); let _=a.out.tx.send(Cmd::Play(false)); }
@@ -1070,7 +1073,7 @@ impl App {
             if cr.right() < tl_x0 || cr.left() > area.right() { continue; }
             let vis = clip(cr);
             let sample = t.lane >= 2;
-            let base = if sample { if t.lane == 2 { C::from_rgb(196, 186, 20) } else { C::from_rgb(70, 90, 190) } } else { C::from_rgb(26, 27, 30) };
+            let base = C::from_rgb(26, 27, 30);
             let title_h = if sample { 11.0 } else { 18.0 };
             let tr = Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + title_h));
             tp.rect_filled(Rect::from_min_max(pos2(cr.left(), tr.bottom()), cr.max), 0.0, if sample { base.gamma_multiply(0.35) } else { C::from_rgb(20, 21, 24) });
@@ -1085,7 +1088,7 @@ impl App {
                 if r.left() > vis.left() + 60.0 { tp.rect_filled(r, 3.0, C::from_rgb(30, 30, 34)); tp.rect_filled(Rect::from_min_size(r.min, vec2(w * v / 100.0, r.height())), 3.0, C::from_rgb(60, 70, 140));
                     tp.text(r.center(), Align2::CENTER_CENTER, txt, FontId::proportional(9.5), TXT); } }
             else if !sample && self.stems.contains_key(&t.path) { tp.text(pos2(vis.right() - 6.0, tr.center().y), Align2::RIGHT_CENTER, "STEMS", FontId::proportional(8.5), C::from_rgb(200, 220, 255)); }
-            tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, if sample { t.title.clone() } else { format!("{} - {}", t.artist, t.title) }, FontId::proportional(if sample { 9.5 } else { 10.5 }), if sample && t.lane == 2 { C::BLACK } else { TXT });
+            tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, if sample { t.title.clone() } else { format!("{} - {}", t.artist, t.title) }, FontId::proportional(if sample { 9.5 } else { 10.5 }), TXT);
             let wave = Rect::from_min_max(pos2(cr.left(), tr.bottom() + if sample { 0.0 } else { 12.0 }), pos2(cr.right(), cr.bottom() - if sample { 0.0 } else { 9.0 }));
             let cps = an.peak_sr as f64 / PEAK_HOP as f64;
             let (cy, hh) = (wave.center().y, wave.height() / 2.0);
@@ -1168,7 +1171,8 @@ impl App {
                 for (k,kind,sb,end) in phrases {
                     let r = Rect::from_min_max(pos2(bx(sb), cr.bottom() - 8.0), pos2(bx(end) - 1.0, cr.bottom())).intersect(cr); if r.width() <= 0.0 { continue; }
                     let pc = crate::phrase::colour(kind); let kind = (kind as usize).min(4);
-                    tp.rect_filled(r, 0.0, C::from_rgb(pc[0], pc[1], pc[2]));
+                    tp.rect_filled(r, 0.0, C::from_rgba_unmultiplied(18, 19, 22, 210));
+                    tp.rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, C::from_rgb(pc[0], pc[1], pc[2]));
                     let xm = bx(sb); if xm >= cr.left() && xm <= cr.right() { tp.line_segment([pos2(xm, cr.top()), pos2(xm, cr.bottom())], Stroke::new(1.0_f32, C::from_rgba_unmultiplied(pc[0], pc[1], pc[2], 150))); }
                     if r.width() > 40.0 { tp.text(pos2(r.left().max(tl_x0) + 3.0, r.center().y), Align2::LEFT_CENTER, crate::phrase::LABELS[kind], FontId::proportional(7.5), C::BLACK); }
                     if !self.arrangement_locked() && !self.select_sections {

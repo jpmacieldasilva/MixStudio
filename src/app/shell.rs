@@ -52,6 +52,9 @@ impl App {
   }
 
   fn shell_editor_tab(&self) -> Option<Tab> {
+    if self.top == 2 {
+      return None;
+    }
     if self.tab == Tab::Compare && self.comparison.incoming.is_some() {
       return Some(Tab::Compare);
     }
@@ -67,17 +70,43 @@ impl App {
     None
   }
 
+  fn shell_frame_pin_demo(&mut self) {
+    let Ok(tab) = std::env::var("MIXSTUDIO_DEMO_TAB") else { return };
+    match tab.as_str() {
+      "library" => {
+        self.top = 2;
+        self.tab = Tab::Library;
+        self.sel = None;
+        self.sel_in = None;
+      }
+      "track" | "arrangement" => {
+        self.top = 3;
+        self.library_ui.side_tab = 1;
+        if self.mix.tracks.len() > 1 {
+          self.sel = Some(1);
+        }
+        self.sel_in = None;
+        self.tab = Tab::Track;
+      }
+      _ => {}
+    }
+  }
+
   pub(super) fn shell_frame(&mut self, ctx: &egui::Context) {
     self.shell_sidebar(ctx);
     self.shell_toolbar(ctx);
     self.shell_status(ctx);
     self.shell_settings_window(ctx);
     self.shell_shortcuts_window(ctx);
+    self.shell_frame_pin_demo();
     let view = self.shell_view();
     let screen = ctx.screen_rect().height();
-    if let Some(t) = self.shell_editor_tab() {
-      self.tab = t;
+    if self.top != 2 {
+      if let Some(t) = self.shell_editor_tab() {
+        self.tab = t;
+      }
     }
+    self.shell_transport_bar(ctx);
     let show_inspector = match view {
       ShellView::Library => self.tab != Tab::Library,
       ShellView::Arrange => self.shell_editor_tab().is_some(),
@@ -114,7 +143,6 @@ impl App {
         )
         .show(ctx, |ui| self.bottom(ui));
     }
-    self.shell_transport_bar(ctx);
     if self.master_popover {
       self.shell_master_popover(ctx);
     }
