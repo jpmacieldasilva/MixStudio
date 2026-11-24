@@ -59,21 +59,12 @@ grid.convert("RGB").save(out)
 print("states grid",out,grid.size)
 PY
 
-pair() {
-  local prop=$1 app=$2 out=$3
-  if [[ -f "$PRANCHAS/$prop" && -f "$STORE/$app" ]]; then
-    convert "$PRANCHAS/$prop" "$STORE/$app" +append "$STORE/comparison/$out"
-    echo "comparison $out"
-  else
-    echo "skip comparison $out (missing $prop or $app)" >&2
-  fi
-}
-
-python3 - <<'PY'
+python3 - <<PY
+import os
 from PIL import Image
-store="$STORE"
+store=os.environ["STORE"]
+pr=os.environ["PRANCHAS"]
 comp=f"{store}/comparison"
-pr="$PRANCHAS"
 pairs=[
 ("01-arrangement-proposta.png","mixstudio-fase2-arrangement-1440.png","mixstudio-compare-arrangement-1440.png"),
 ("02-editor-transicao-proposta.png","mixstudio-fase2-transition-editor-1440.png","mixstudio-compare-transition-editor-1440.png"),
