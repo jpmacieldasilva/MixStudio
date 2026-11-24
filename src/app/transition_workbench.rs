@@ -77,6 +77,7 @@ impl App {
         }
         let mut choice=self.sel_in.and_then(|i|transitions.iter().position(|x|x.1==i)).unwrap_or(0);
         let old=choice;
+        let (o,i,_,_)=transitions[choice];
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(format!("Transition {} / {}",choice+1,transitions.len())).size(12.5).strong());
             egui::ComboBox::from_id_salt("transition_choice").width(180.0).selected_text(format!("{} to {}",self.mix.tracks[o].title,self.mix.tracks[i].title)).show_ui(ui,|ui| {

@@ -1375,7 +1375,11 @@ impl App {
             if sel {
                 for x in [bx(s), bx(e)] {
                     if x >= tl_x0 && x <= area.right() {
+<<<<<<< HEAD
                         let dash = egui::Stroke::new(1.0, ACCENT.gamma_multiply(0.85));
+=======
+                        let dash = egui::Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.85));
+>>>>>>> 08764d3 (feat(ui): MixStudio phase 2 board layout and P0 fixes)
                         for lane in [d1, d2] {
                             let mut y0 = lane.top();
                             while y0 < lane.bottom() {
