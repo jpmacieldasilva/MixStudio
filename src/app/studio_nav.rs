@@ -38,10 +38,10 @@ impl App {
             .stroke(Stroke::new(1.0_f32, LINE_SOFT))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if theme::seg_button(ui, "Tracks", tab == 0).clicked() {
+                    if theme::seg_button(ui, "Library", tab == 0).clicked() {
                         self.library_ui.side_tab = 0;
                     }
-                    if theme::seg_button(ui, "Mix", tab == 1).clicked() {
+                    if theme::seg_button(ui, "Playlist", tab == 1).clicked() {
                         self.library_ui.side_tab = 1;
                     }
                 });

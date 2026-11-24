@@ -69,80 +69,90 @@ impl App {
         }
     }
     pub(super) fn transition_tab(&mut self,ui:&mut egui::Ui) {
-        egui::ScrollArea::vertical().id_salt("transition_tools").show(ui,|ui| {
-            let transitions=self.mix.logical_transitions();
-            if transitions.is_empty() {
-                ui.label("No transition yet. Add two overlapping tracks.");
-                if self.mix.has_transition_locks() && ui.button("Unlock all transitions").clicked() {self.snapshot();for t in &mut self.mix.tracks {t.trans.locked=false;}}
-                return;
-            }
-            let mut choice=self.sel_in.and_then(|i|transitions.iter().position(|x|x.1==i)).unwrap_or(0);
-            let old=choice;
-            ui.horizontal_wrapped(|ui| {
-                ui.strong("Transition");
-                egui::ComboBox::from_id_salt("transition_choice").selected_text(format!("{} of {}",choice+1,transitions.len())).show_ui(ui,|ui| {for (k,(o,i,_,_)) in transitions.iter().enumerate() {ui.selectable_value(&mut choice,k,format!("{}: {} to {}",k+1,self.mix.tracks[*o].title,self.mix.tracks[*i].title));}});
-                if ui.add_enabled(choice>0,egui::Button::new("Previous")).clicked() {choice-=1;}
-                if ui.add_enabled(choice+1<transitions.len(),egui::Button::new("Next")).clicked() {choice+=1;}
+        let transitions=self.mix.logical_transitions();
+        if transitions.is_empty() {
+            ui.label("No transition yet. Add two overlapping tracks.");
+            if self.mix.has_transition_locks() && ui.button("Unlock all transitions").clicked() {self.snapshot();for t in &mut self.mix.tracks {t.trans.locked=false;}}
+            return;
+        }
+        let mut choice=self.sel_in.and_then(|i|transitions.iter().position(|x|x.1==i)).unwrap_or(0);
+        let old=choice;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Transition {} / {}",choice+1,transitions.len())).size(12.5).strong());
+            egui::ComboBox::from_id_salt("transition_choice").width(180.0).selected_text(format!("{} to {}",self.mix.tracks[o].title,self.mix.tracks[i].title)).show_ui(ui,|ui| {
+                for (k,(oo,ii,_,_)) in transitions.iter().enumerate() {ui.selectable_value(&mut choice,k,format!("{}: {} to {}",k+1,self.mix.tracks[*oo].title,self.mix.tracks[*ii].title));}
             });
-            if old!=choice {self.stop_transition_audition();}
-            let (o,i,s,e)=transitions[choice];
-            if self.transition_audition.as_ref().is_some_and(|a|a.incoming!=i) {self.stop_transition_audition();}
-            self.sel_in=Some(i);
-            ui.label(egui::RichText::new(format!("A: {}  |  B: {}",self.mix.tracks[o].title,self.mix.tracks[i].title)).strong());
-            ui.label(format!("Overlap: mix bars {:.2}–{:.2} · {:.2} bars · {:.1} seconds",s/4.0+1.0,e/4.0+1.0,(e-s)/4.0,self.mix.secs(s,e)));
-            section(ui,"Beatmatch");
-            self.beatmatch_ui(ui,false);
-            section(ui,"Details");
-            for (side,label) in [(0,"A outgoing"),(1,"B incoming")] {
-                let ranges=self.transition_source_ranges(i,side);
-                let line=ranges.iter().map(|(_,_,a,b)|format!("{} – {}",source_time(*a),source_time(*b))).collect::<Vec<_>>().join("; ");
-                ui.label(format!("{label} · source {line}"));
-            }
-            ui.horizontal_wrapped(|ui| {
+            if ui.add_enabled(choice>0,egui::Button::new("‹").small()).clicked() {choice-=1;}
+            if ui.add_enabled(choice+1<transitions.len(),egui::Button::new("›").small()).clicked() {choice+=1;}
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
                 let mut protected=self.mix.tracks[i].trans.locked;
-                if ui.checkbox(&mut protected,"Protect this transition").on_hover_text("Save the protection with the project. Freeze arrangement placement/ratios and this transition’s settings until unlocked.").changed() {self.set_transition_protection(i,protected);}
-                if self.mix.has_transition_locks() && ui.button("Unlock all transitions").clicked() {self.snapshot();for t in &mut self.mix.tracks {t.trans.locked=false;}}
-            });
-            if self.mix.has_transition_locks() {ui.colored_label(C::LIGHT_YELLOW,"Protected transitions freeze arrangement moves, cuts, reorder and automatic beat ratios. Unlock to change placement.");}
-            self.harmony_ui(ui,o,i);
-            ui.horizontal_wrapped(|ui| {self.song_gain_control(ui,o,"A gain");self.song_gain_control(ui,i,"B gain");});
-            self.transition_listen_ui(ui,i);
-            section(ui,"Shape");
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Overlap length:");
-                for bars in [4,8,16,32] {
-                    if ui.add_enabled(!self.arrangement_locked(),egui::Button::new(format!("{bars} bars"))).clicked() {self.snapshot();self.mix.shift_logical_transition(i,(e-s)-bars as f64*4.0,true);}
+                if ui.checkbox(&mut protected,"Protect").on_hover_text("Freeze this transition and its placement").changed() {self.set_transition_protection(i,protected);}
+                if self.tab!=Tab::Compare && ui.button("Compare…").clicked() {self.open_comparison(i);}
+                if ui.add(egui::Button::new(egui::RichText::new("Play Transition").color(BG)).fill(ACCENT).min_size(egui::vec2(118.0,26.0))).clicked() {
+                    self.start_transition_audition(i,3,self.transition_repeat);
                 }
-                let mut ratio=self.mix.tracks[i].trans.ratio;
-                ui.label("Incoming beat ratio:").on_hover_text(format!("Current mapping: one B source beat spans {:.3} mix beats. Auto selects a ratio when the arrangement is unlocked.",self.mix.tracks[i].beat_mult));
-                ui.add_enabled_ui(!self.arrangement_locked(),|ui| {egui::ComboBox::from_id_salt("beat_ratio").selected_text(crate::model::RATIOS[ratio as usize].0).show_ui(ui,|ui| {for (k,(name,_)) in crate::model::RATIOS.iter().enumerate() {ui.selectable_value(&mut ratio,k as u8,*name);}});});
-                if ratio!=self.mix.tracks[i].trans.ratio {self.snapshot();self.mix.tracks[i].trans.ratio=ratio;self.mix.sync_transition(i);self.mix.resolve_ratios();}
             });
-            let editable=!self.lock && !self.mix.tracks[i].trans.locked;
-            ui.add_enabled_ui(editable,|ui| {
-                let mut preset=self.mix.tracks[i].trans.preset;
-                ui.horizontal_wrapped(|ui| {ui.label("Transition preset:");egui::ComboBox::from_id_salt("transition_preset").selected_text(preset.name()).show_ui(ui,|ui| {for p in Preset::ALL {ui.selectable_value(&mut preset,p,p.name());}});});
-                if preset!=self.mix.tracks[i].trans.preset {self.snapshot();let t=&mut self.mix.tracks[i].trans;t.preset=preset;t.stems=match preset {Preset::BassSwap=>[StemMode::Crossfade,StemMode::Swap,StemMode::Crossfade,StemMode::Crossfade],Preset::EchoOut=>[StemMode::Swap;4],_=>[StemMode::Crossfade;4]};}
-                let mut stems=self.mix.tracks[i].trans.stems;
-                ui.horizontal_wrapped(|ui| {for k in 0..4 {ui.label(STEM_N[k]);egui::ComboBox::from_id_salt(("transition_stem",k)).width(95.0).selected_text(stems[k].name()).show_ui(ui,|ui| {for mode in StemMode::ALL {ui.selectable_value(&mut stems[k],mode,mode.name());}});}});
-                if stems!=self.mix.tracks[i].trans.stems {self.snapshot();self.mix.tracks[i].trans.stems=stems;}
-                self.trans_curves_ui(ui,i);
-            });
-            self.mix.sync_transition(i);
-            let stems_ready=[o,i].iter().all(|i|self.stems.contains_key(&self.mix.tracks[*i].path));
-            ui.label(if stems_ready {"Stems ready: stem choices and preset processing are active."}else{"Stems unavailable: the preset volume curve is used. Separate both tracks to hear individual stem choices."});
-            if !stems_ready && ui.button("Separate stems for both").clicked() {self.request_stems(o);self.request_stems(i);}
-            if ui.button("Open Beatgrid ➡ source grid tools").clicked() {self.stop_transition_audition();self.sel=Some(i);self.tab=Tab::Grid;}
         });
+        if old!=choice {self.stop_transition_audition();}
+        let (o,i,s,e)=transitions[choice];
+        if self.transition_audition.as_ref().is_some_and(|a|a.incoming!=i) {self.stop_transition_audition();}
+        self.sel_in=Some(i);
+        ui.label(egui::RichText::new(format!("Overlap · {:.0} bars · {:.1}s", (e-s)/4.0, self.mix.secs(s,e))).size(11.0).color(DIM));
+        ui.add_space(4.0);
+        let editable=!self.lock && !self.mix.tracks[i].trans.locked;
+        ui.columns(4,|cols| {
+            cols[0].vertical(|ui| {
+                ui.label(egui::RichText::new("PRESET").size(10.0).color(MUTED).strong());
+                ui.add_enabled_ui(editable,|ui| {
+                    let mut preset=self.mix.tracks[i].trans.preset;
+                    egui::ComboBox::from_id_salt("transition_preset").width(ui.available_width()).selected_text(preset.name()).show_ui(ui,|ui| {for p in Preset::ALL {ui.selectable_value(&mut preset,p,p.name());}});
+                    if preset!=self.mix.tracks[i].trans.preset {self.snapshot();let t=&mut self.mix.tracks[i].trans;t.preset=preset;t.stems=match preset {Preset::BassSwap=>[StemMode::Crossfade,StemMode::Swap,StemMode::Crossfade,StemMode::Crossfade],Preset::EchoOut=>[StemMode::Swap;4],_=>[StemMode::Crossfade;4]};}
+                    ui.add_space(4.0);
+                    self.harmony_ui(ui,o,i);
+                });
+            });
+            cols[1].vertical(|ui| {
+                ui.label(egui::RichText::new("STEMS").size(10.0).color(MUTED).strong());
+                ui.add_enabled_ui(editable,|ui| {
+                    let mut stems=self.mix.tracks[i].trans.stems;
+                    for k in 0..4 {
+                        ui.horizontal(|ui| {ui.label(STEM_N[k]);egui::ComboBox::from_id_salt(("transition_stem",k)).width(ui.available_width()-24.0).selected_text(stems[k].name()).show_ui(ui,|ui| {for mode in StemMode::ALL {ui.selectable_value(&mut stems[k],mode,mode.name());}});});
+                    }
+                    if stems!=self.mix.tracks[i].trans.stems {self.snapshot();self.mix.tracks[i].trans.stems=stems;}
+                });
+                let stems_ready=[o,i].iter().all(|ti|self.stems.contains_key(&self.mix.tracks[*ti].path));
+                if !stems_ready && ui.small_button("Separate both").clicked() {self.request_stems(o);self.request_stems(i);}
+            });
+            cols[2].vertical(|ui| {
+                ui.label(egui::RichText::new("OVERLAP").size(10.0).color(MUTED).strong());
+                ui.horizontal_wrapped(|ui| {
+                    for bars in [4,8,16,32] {
+                        if ui.add_enabled(!self.arrangement_locked(),egui::Button::new(format!("{bars} bars")).small()).clicked() {self.snapshot();self.mix.shift_logical_transition(i,(e-s)-bars as f64*4.0,true);}
+                    }
+                });
+                let mut ratio=self.mix.tracks[i].trans.ratio;
+                ui.add_enabled_ui(!self.arrangement_locked(),|ui| {
+                    egui::ComboBox::from_id_salt("beat_ratio").width(ui.available_width()).selected_text(format!("Ratio · {}",crate::model::RATIOS[ratio as usize].0)).show_ui(ui,|ui| {for (k,(name,_)) in crate::model::RATIOS.iter().enumerate() {ui.selectable_value(&mut ratio,k as u8,*name);}});
+                });
+                if ratio!=self.mix.tracks[i].trans.ratio {self.snapshot();self.mix.tracks[i].trans.ratio=ratio;self.mix.sync_transition(i);self.mix.resolve_ratios();}
+                ui.horizontal(|ui| {self.song_gain_control(ui,o,"A");self.song_gain_control(ui,i,"B");});
+            });
+            cols[3].vertical(|ui| {
+                ui.label(egui::RichText::new("BEATMATCH").size(10.0).color(MUTED).strong());
+                self.beatmatch_ui(ui,false);
+            });
+        });
+        self.mix.sync_transition(i);
+        ui.separator();
+        self.transition_listen_ui(ui,i);
+        ui.add_enabled_ui(editable,|ui| {self.trans_curves_ui(ui,i);});
     }
     fn transition_listen_ui(&mut self,ui:&mut egui::Ui,incoming:usize) {
-        section(ui,"Listen");
         ui.horizontal_wrapped(|ui| {
             ui.label("Before:");ui.add(egui::DragValue::new(&mut self.transition_pre).range(0..=8).suffix(" bars"));
             ui.label("After:");ui.add(egui::DragValue::new(&mut self.transition_post).range(0..=8).suffix(" bars"));
             ui.checkbox(&mut self.transition_repeat,"Repeat");
-            if ui.button("Play transition").clicked() {self.start_transition_audition(incoming,3,self.transition_repeat);}
-            if ui.add_enabled(self.transition_audition.is_some(),egui::Button::new("Stop audition")).clicked() {self.stop_transition_audition();}
+            if ui.add_enabled(self.transition_audition.is_some(),egui::Button::new("Stop")).clicked() {self.stop_transition_audition();}
         });
         ui.horizontal_wrapped(|ui| {
             for (side,label) in [(1,"Monitor A"),(3,"Both"),(2,"Monitor B")] {
