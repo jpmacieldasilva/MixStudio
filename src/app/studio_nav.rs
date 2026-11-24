@@ -30,6 +30,9 @@ impl App {
     }
 
     fn studio_sidebar_arrange(&mut self, ui: &mut egui::Ui) {
+        if matches!(self.tab, Tab::Transition | Tab::Playlist) {
+            self.library_ui.side_tab = 1;
+        }
         let tab = self.library_ui.side_tab;
         egui::Frame::none()
             .fill(CTRL_FILL)
@@ -47,7 +50,9 @@ impl App {
                 });
             });
         ui.add_space(6.0);
-        if tab == 0 {
+        if self.tab == Tab::Transition {
+            self.studio_mix_nav(ui);
+        } else if tab == 0 {
             self.studio_track_picker(ui);
         } else {
             self.studio_mix_nav(ui);

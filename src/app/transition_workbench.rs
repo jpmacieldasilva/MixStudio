@@ -271,6 +271,7 @@ impl App {
             self.stop_transition_audition();
         }
         self.sel_in = Some(i);
+        self.library_ui.side_tab = 1;
         self.transition_header(ui, choice, &transitions, o, i, s, e);
         let editable = !self.lock && !self.mix.tracks[i].trans.locked;
         ui.columns(4, |cols| {

@@ -8,7 +8,19 @@ impl App {
             return;
         }
         let folder = demo_dir.display().to_string();
-        let templates: Vec<crate::library::Entry> = self.lib.index.entries.clone();
+        let mut templates: Vec<crate::library::Entry> = self.lib.index.entries.clone();
+        if templates.is_empty() {
+            let folder = demo_dir.display().to_string();
+            for path in self.store.keys() {
+                let name = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("Track");
+                templates.push(crate::library::Entry {
+                    path: path.clone(),
+                    folder: folder.clone(),
+                    title: name.into(),
+                    ..Default::default()
+                });
+            }
+        }
         if templates.is_empty() {
             return;
         }
@@ -164,6 +176,30 @@ fn folder_node(ui:&mut egui::Ui,node:&crate::library::browse::FolderNode,current
         .show_header(ui,|ui|row(ui,selected,remove)).body(|ui|{for child in &node.children {folder_node(ui,child,current,selected,remove,false);}});}
 }
 impl App {
+    pub(super) fn library_demo_maintain(&mut self) {
+        if !library_capture_demo() {
+            return;
+        }
+        self.lib.abort_scan();
+        self.lib_q.clear();
+        self.lib_key = false;
+        self.lib_bpm = false;
+        if self.library_ui.folder.is_some() {
+            self.choose_library_folder(None);
+        }
+        if self.lib.index.entries.len() < 412 {
+            self.library_ui.demo_catalog_done = false;
+            if let Some(root) = self.lib.cfg.folders.first().cloned() {
+                self.seed_library_demo_catalog(std::path::Path::new(&root));
+                self.lib_view_key = None;
+                self.refresh_library_view();
+            }
+        }
+        if self.lib.index.entries.len() >= 412 {
+            self.lib_view_key = None;
+            self.refresh_library_view();
+        }
+    }
     pub(super) fn library_entries(&self)->&[crate::library::Entry] {if self.lib_node.is_some(){&self.lib_cur}else{&self.lib.index.entries}}
     pub(super) fn library_selected_paths(&self)->Vec<String> {
         self.lib_view.iter().filter_map(|&i|self.library_entries().get(i)).filter(|e|self.lib_sel.contains(&e.path)).map(|e|e.path.clone()).collect()
@@ -231,9 +267,11 @@ impl App {
             });
         });
         if library_capture_demo() {
-            let mx = self.lib.index.entries.iter().filter(|e| e.path.contains("catalog") || e.folder.contains("demo")).count().max(380);
-            let _ = nav_row(ui, "Music › mx-demo", mx, self.library_ui.folder.as_deref() == Some("mx-demo"));
-            let _ = nav_row(ui, "Promos 2026", 32, self.library_ui.folder.as_deref() == Some("promos-2026"));
+            let _ = nav_row(ui, "Music", 366, false);
+            ui.indent("demo-mx", |ui| {
+                let _ = nav_row(ui, "mx-demo", 4, false);
+                let _ = nav_row(ui, "Promos 2026", 46, false);
+            });
         } else {
             let key = (self.lib.path_gen, self.lib.cfg.folders.clone());
             if self.library_ui.tree_key.as_ref() != Some(&key) {

@@ -147,6 +147,12 @@ pub fn png_rgba(width: u32, n: u32, rgba: &[u8]) -> Vec<u8> {
 /// Developer hook: `MIXSTUDIO_SCREENSHOT=out.png` saves this window's own frame after a few seconds and closes the app.
 fn capture_screenshot(ctx: &egui::Context) {
     let Some(path) = std::env::var_os("MIXSTUDIO_SCREENSHOT") else { return };
+    if std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library")
+        && !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("shot_ready")).unwrap_or(false))
+    {
+        ctx.request_repaint();
+        return;
+    }
     let shot = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
     if let Some(img) = shot {
         let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_array()).collect();
@@ -196,13 +202,17 @@ impl App {
             lib_q: String::new(), lib_path: String::new(), lib_sort: crate::library::SortCol::Filename, lib_asc: true, lib_key: false, lib_bpm: false, lib_pct: 6.0,
             lib_sel: Default::default(), lib_anchor: None, lib_view: vec![], lib_node: None, lib_cur: vec![], lib_cur_key: None, lib_found: vec![], lib_imp: String::new(), lib_remaps: vec![], lib_remaps_init: false, library_ui:Default::default(), lib_view_key: None, timeline_rect: Rect::NOTHING, sidebar_open: true,
             settings_open: false, shortcuts_help: false, master_popover: false };
-        if !a.lib.cfg.folders.is_empty() { a.lib.rescan(); }
+        let lib_demo_capture = std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library");
+        if !a.lib.cfg.folders.is_empty() && !lib_demo_capture { a.lib.rescan(); }
         if let Some(d) = demo {
             let demo_dir = std::path::Path::new(&d);
             let paths = crate::gen_demo(demo_dir);
             if demo_dir.is_dir() {
-                a.lib.add_folder(demo_dir);
-                a.lib.rescan();
+                if lib_demo_capture {
+                    a.lib.push_folder_quiet(demo_dir);
+                } else {
+                    a.lib.add_folder(demo_dir);
+                }
             }
             for p in &paths { if let Ok((au, an)) = analysis::load(p) { a.insert(p.clone(), au, an, None); } }
             let pr = [Preset::Crossfade, Preset::BassSwap, Preset::EchoOut, Preset::HighToLow];
@@ -236,13 +246,14 @@ impl App {
                 }
                 Ok("master") => { a.tab = Tab::Master; a.sel = None; }
                 Ok("library") => {
-                    a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_key = false; a.lib_bpm = false; a.lib_pct = 6.0;
+                    a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_q.clear(); a.lib_key = false; a.lib_bpm = false; a.lib_pct = 6.0;
                     let demo_s = demo_dir.display().to_string();
                     a.lib.cfg.folders = vec![demo_s.clone()];
                     a.lib.cfg.imports.clear();
                     a.lib.index.entries.retain(|e| e.folder == demo_s || std::path::Path::new(&e.path).starts_with(demo_dir));
                     a.lib.states.retain(|k, _| k == &demo_s);
                     a.library_ui.tree_key = None;
+                    a.library_ui.folder = None;
                     a.lib.abort_scan();
                     a.seed_library_demo_catalog(demo_dir);
                     a.seed_library_demo_metadata();
@@ -893,6 +904,10 @@ impl eframe::App for App {
             Msg::Status(s) => self.status = s, Msg::Opened(p) => self.open(p), Msg::SaveTo(p,id) => self.finish_save(p,&id), Msg::ExportTo(p,id) => if id==self.persistence.id {self.export(p)},
         } }
         self.lib.poll();
+        self.library_demo_maintain();
+        if std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library") && self.lib.index.entries.len() >= 412 {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("shot_ready"), true));
+        }
         self.scratch_window(ctx);
         if let Some((p, v)) = ctx.data_mut(|d| { let r = d.get_temp::<(String, Option<Vec<(f64, u8)>>)>(egui::Id::new("phr_act")); d.remove::<(String, Option<Vec<(f64, u8)>>)>(egui::Id::new("phr_act")); r }) {
             self.snapshot(); match v { Some(v) => { self.mix.phrase_edit.insert(p, v); } None => { self.mix.phrase_edit.remove(&p); } } self.status = "Phrase labels updated".into(); }
@@ -1141,7 +1156,8 @@ impl App {
             let tr = Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + title_h));
             tp.rect_filled(Rect::from_min_max(pos2(cr.left(), tr.bottom()), cr.max), 0.0, body_col);
             let kc = key_col(&t.key);
-            tp.rect_filled(tr, 0.0, kc.gamma_multiply(if selected { 0.32 } else { 0.22 }));
+            tp.rect_filled(tr, 0.0, C::from_rgb(24, 25, 28));
+            tp.rect_filled(Rect::from_min_max(tr.min, pos2(tr.left() + 3.0, tr.bottom())), 0.0, kc.gamma_multiply(0.55));
             let mut x = vis.left() + 6.0;
             if !sample {
                 let kr = Rect::from_min_size(pos2(x, tr.top() + 2.0), vec2(22.0, title_h - 4.0));
@@ -1272,7 +1288,7 @@ impl App {
                 tp.text(pos2(x+3.0,wave.top()+3.0),Align2::LEFT_TOP,"|",FontId::proportional(10.0),ACCENT);
             } }
             if selected {
-                tp.rect_stroke(cr, 2.0, Stroke::new(1.5_f32, FOCUS));
+                tp.rect_stroke(cr, 2.0, Stroke::new(1.0_f32, C::from_rgb(210, 214, 222)));
             } else {
                 tp.rect_stroke(cr, 2.0, Stroke::new(1.0, C::from_rgb(48, 50, 56)));
             }
@@ -1465,7 +1481,7 @@ impl App {
             let chip = Rect::from_min_max(pos2(x0 + 2.0, trans_strip.top() + 3.0), pos2(x1 - 2.0, trans_strip.bottom() - 3.0));
             let (_, col, lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
             tp.rect_filled(chip, 4.0, if sel { C::from_rgb(52, 54, 60) } else { C::from_rgb(38, 40, 44) });
-            tp.rect_stroke(chip, 4.0, Stroke::new(if sel { 1.5_f32 } else { 1.0 }, if sel { FOCUS } else { LINE }));
+            tp.rect_stroke(chip, 4.0, Stroke::new(if sel { 1.25_f32 } else { 1.0 }, if sel { C::from_rgb(108, 112, 120) } else { LINE }));
             tp.circle_filled(pos2(chip.left() + 8.0, chip.center().y), 3.5, compat_col(col));
             let tt = &self.mix.tracks[i].trans;
             let nst = tt.stems.iter().filter(|m| **m != StemMode::Crossfade).count();
@@ -1490,7 +1506,7 @@ impl App {
             if sel {
                 for x in [bx(s), bx(e)] {
                     if x >= tl_x0 && x <= area.right() {
-                        let dash = egui::Stroke::new(1.0_f32, ACCENT.gamma_multiply(0.85));
+                        let dash = egui::Stroke::new(1.0_f32, C::from_rgb(100, 104, 112));
                         for lane in [d1, d2] {
                             let mut y0 = lane.top();
                             while y0 < lane.bottom() {
@@ -1937,7 +1953,6 @@ impl App {
             let path=t.path.clone();
             let missing=!self.store.contains_key(&path);
             ui.horizontal(|ui| {
-                chip(ui, t.key.clone(), key_col(&t.key));
                 let bar = t.start_beat / 4.0 + 1.0;
                 let unit = if t.artist.is_empty() {
                     format!("Deck {} Unit", t.lane + 1)
@@ -1953,10 +1968,10 @@ impl App {
                 .on_hover_text(&path);
                 ui.label(
                     egui::RichText::new(format!(
-                        "{:.1} BPM · {} · Deck {} · bar {:.0}",
+                        "{} · {:.1} BPM · {} · bar {:.0}",
+                        t.key,
                         t.bpm,
                         fmt_t(t.duration),
-                        t.lane + 1,
                         bar
                     ))
                     .size(11.5)
