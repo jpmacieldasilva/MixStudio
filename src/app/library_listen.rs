@@ -59,13 +59,15 @@ impl App {
     pub(super) fn listen_ui(&mut self,ui:&mut egui::Ui) {
         let Some(l)=&self.listen else { return; };
         let (title,error,ready)=(l.title.clone(),l.error.clone(),l.ready.clone());
+        let has_err = error.is_some();
+        let subtitle = match (&error,&ready) { (Some(e),_)=>format!("Cannot play: {e}"), (None,None)=>"Loading…".into(), (None,Some(_))=>"First drop · original tempo".into() };
         let mut stop=false; let mut seek=None;
         egui::Frame::none().fill(C::from_rgb(40,40,24)).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32,C::from_rgb(110,106,30))).inner_margin(egui::Margin::symmetric(8.0,4.0)).show(ui,|ui|{
             ui.horizontal(|ui|{
                 if ui.add(egui::Button::new(egui::RichText::new("⏹").color(BG)).fill(ACCENT).min_size(vec2(28.0,24.0))).on_hover_text("Stop preview (Space)").clicked() { stop=true; }
                 ui.vertical(|ui|{ ui.spacing_mut().item_spacing.y=0.0;
                     ui.add(egui::Label::new(egui::RichText::new(&title).strong().size(12.5)).truncate());
-                    ui.label(egui::RichText::new(match (&error,&ready) { (Some(e),_)=>format!("Cannot play: {e}"), (None,None)=>"Loading…".into(), (None,Some((_,an)))=>format!("Preview · original tempo {:.1} BPM · {}",an.bpm,an.key) }).size(10.5).color(if error.is_some() {C::LIGHT_RED} else {DIM}));
+                    ui.label(egui::RichText::new(subtitle).size(10.5).color(if has_err {C::LIGHT_RED} else {DIM}));
                 });
                 let Some((_,an))=&ready else { if error.is_none() { ui.spinner(); } return; };
                 let pos=sec_at(an,self.engine_beat()).clamp(0.0,an.duration);

@@ -6,9 +6,13 @@ export LIBRARY_PATH="${LIBRARY_PATH:-/usr/lib/gcc/x86_64-linux-gnu/12}"
 export CXX="${CXX:-g++}"
 export CC="${CC:-gcc}"
 STORE="${MIXSTUDIO_STORE_MEDIA:-/cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/media}"
-PRANCHAS="${MIXSTUDIO_PRANCHAS:-/tmp/mixstudio-revisao/revisao/pranchas}"
+PROPOSTAS="/cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/internal/propostas"
+PRANCHAS="${MIXSTUDIO_PRANCHAS:-$PROPOSTAS}"
 mkdir -p "$STORE" "$STORE/comparison"
-tar -xzf /cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/internal/mixstudio-revisao-spec.tar.gz -C /tmp revisao/pranchas 2>/dev/null || true
+if [[ ! -f "$PRANCHAS/01-arrangement-proposta.png" ]]; then
+  tar -xzf /cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/internal/mixstudio-revisao-spec.tar.gz -C /tmp revisao/pranchas 2>/dev/null || true
+  PRANCHAS="${MIXSTUDIO_PRANCHAS:-/tmp/mixstudio-revisao/revisao/pranchas}"
+fi
 cargo build --release --locked -q
 BIN="./target/release/mixstudio"
 DEMO_ROOT="/tmp/mixstudio-fase2-demo"
@@ -66,16 +70,26 @@ from PIL import Image
 store=os.environ["STORE"]
 pr=os.environ["PRANCHAS"]
 comp=f"{store}/comparison"
+states_prop=f"{pr}/05-estados-proposta.png"
+if not os.path.isfile(states_prop):
+    alt="/tmp/mixstudio-revisao/revisao/pranchas/05-estados-proposta.png"
+    if os.path.isfile(alt):
+        states_prop=alt
 pairs=[
 ("01-arrangement-proposta.png","mixstudio-fase2-arrangement-1440.png","mixstudio-compare-arrangement-1440.png"),
 ("02-editor-transicao-proposta.png","mixstudio-fase2-transition-editor-1440.png","mixstudio-compare-transition-editor-1440.png"),
 ("03-library-proposta.png","mixstudio-fase2-library-1440.png","mixstudio-compare-library-1440.png"),
 ("04-playlist-auto-order-proposta.png","mixstudio-fase2-playlist-autoorder-1440.png","mixstudio-compare-playlist-autoorder-1440.png"),
-("06-transicao-1280-proposta.png","mixstudio-fase2-transition-1280.png","mixstudio-compare-transition-1280.png"),
-("05-estados-proposta.png","mixstudio-fase2-states-1440.png","mixstudio-compare-states-1440.png"),
+("02-editor-transicao-proposta.png","mixstudio-fase2-transition-1280.png","mixstudio-compare-transition-1280.png"),
 ]
+if os.path.isfile(states_prop):
+    pairs.append((states_prop,"mixstudio-fase2-states-1440.png","mixstudio-compare-states-1440.png"))
+resolved=[]
 for prop,app,out in pairs:
-    a=Image.open(f"{pr}/{prop}"); b=Image.open(f"{store}/{app}")
+    path=prop if os.path.isabs(prop) or prop.startswith("/") else f"{pr}/{prop}"
+    resolved.append((path,app,out))
+for prop_path,app,out in resolved:
+    a=Image.open(prop_path); b=Image.open(f"{store}/{app}")
     h=max(a.height,b.height)
     if a.height!=h: a=a.resize((int(a.width*h/a.height),h),Image.Resampling.LANCZOS)
     if b.height!=h: b=b.resize((int(b.width*h/b.height),h),Image.Resampling.LANCZOS)

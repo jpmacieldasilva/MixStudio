@@ -88,6 +88,21 @@ impl App {
         self.sel_in = None;
         self.tab = Tab::Track;
       }
+      "transition" => {
+        self.top = 3;
+        self.library_ui.side_tab = 1;
+        self.sel = None;
+        if let Some(&(_, i, _, _)) = self.mix.logical_transitions().first() {
+          self.sel_in = Some(i);
+          self.tab = Tab::Transition;
+        }
+      }
+      "autoorder" => {
+        self.top = 3;
+        self.library_ui.side_tab = 1;
+        self.tab = Tab::Playlist;
+        self.library_ui.capture_autoorder_menu = true;
+      }
       _ => {}
     }
   }
@@ -305,6 +320,13 @@ impl App {
                 }
               },
             );
+            let len = self.mix.length_beats();
+            let dur = fmt_t(len * 60.0 / self.mix.bpm.max(1.0));
+            ui.label(
+              egui::RichText::new(format!("{} tracks · {}", self.mix.tracks.len(), dur))
+                .size(11.0)
+                .color(MUTED),
+            );
           });
           let mid = ui.max_rect().center().x;
           let cur = ui.cursor().min.x;
@@ -343,7 +365,7 @@ impl App {
             {
               self.dialog(true, 2);
             }
-            ui.menu_button(
+            let ao = ui.menu_button(
               egui::RichText::new("Auto-order").size(13.0),
               |ui| {
                 if ui.button("Run Auto-order").clicked() {
@@ -361,13 +383,14 @@ impl App {
                   ui.radio_value(&mut self.ao_curve, c, c.name());
                 }
                 ui.checkbox(&mut self.ao_keep_first, "Keep first track");
-                if ui.button(format!("Set all overlaps to {} bars", self.bars / 4)).clicked() {
+                if ui.button("Set All Overlaps to 8 Bars").clicked() {
                   self.snapshot();
+                  self.bars = 32;
                   let o = self.mix.main_order();
                   self.mix.relayout(&o, self.bars as f64);
                   ui.close_menu();
                 }
-                if ui.button("Overlap outros with intros (phrases)").clicked() {
+                if ui.button("Overlap Outros with Intros").clicked() {
                   self.overlap_outros_with_intros();
                   ui.close_menu();
                 }
@@ -380,6 +403,10 @@ impl App {
                 }
               },
             );
+            if self.library_ui.capture_autoorder_menu {
+              let id = ao.response.id;
+              ui.ctx().memory_mut(|m| m.open_popup(id));
+            }
           });
         });
       });

@@ -251,59 +251,85 @@ impl App {
             self.studio_playlist_footer(ui, 0);
             return;
         }
-        egui::ScrollArea::vertical().id_salt("studio_mix_rows").show(ui, |ui| {
-            for (k, &ti) in order.iter().enumerate() {
+        let row_data: Vec<(usize, String, String, f64, usize, f64, f64)> = order
+            .iter()
+            .map(|&ti| {
                 let t = &self.mix.tracks[ti];
-                let sel = self.sel == Some(ti);
-                let playing = self.playing() && self.sel == Some(ti);
+                (
+                    ti,
+                    t.key.clone(),
+                    t.title.clone(),
+                    t.bpm,
+                    t.lane,
+                    t.start_beat,
+                    self.sec(t.start_beat),
+                )
+            })
+            .collect();
+        let trans_data: Vec<Option<(String, C, String)>> = order
+            .windows(2)
+            .map(|w| {
+                let o = w[0];
+                let i = w[1];
+                let (_, col, lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
+                let pct = (self.mix.tracks[i].bpm / self.mix.tracks[o].bpm - 1.0) * 100.0;
+                let preset = self.mix.tracks[i].trans.preset.name().to_string();
+                Some((preset, compat_col(col), format!("{lab} {:+.1}%", pct)))
+            })
+            .collect();
+        egui::ScrollArea::vertical().id_salt("studio_mix_rows").show(ui, |ui| {
+            for (k, (ti, key, title, bpm, lane, start, at)) in row_data.iter().enumerate() {
+                let sel = self.sel == Some(*ti);
+                let playing = self.playing() && self.sel == Some(*ti);
                 let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), SIDE_ROW_H), Sense::click());
                 if response.clicked() {
-                    self.sel = Some(ti);
+                    self.sel = Some(*ti);
                     self.sel_in = None;
                     self.tab = Tab::Track;
                 }
-                let p = ui.painter();
+                {
+                let p = ui.painter_at(rect);
                 if sel || response.hovered() {
                     p.rect_filled(rect, 6.0, if sel { FOCUS_SOFT } else if playing { CTRL_HOVER } else { CTRL_HOVER });
                 }
-                chip_at(p, pos2(rect.left() + 4.0, rect.center().y), &t.key, key_col(&t.key));
                 p.text(
-                    pos2(rect.left() + 50.0, rect.top() + 4.0),
-                    Align2::LEFT_TOP,
-                    &t.title,
-                    FontId::proportional(12.0),
-                    TXT,
+                    pos2(rect.left() + 6.0, rect.center().y),
+                    Align2::LEFT_CENTER,
+                    format!("{}", k + 1),
+                    FontId::proportional(11.0),
+                    MUTED,
                 );
-                let artist = if t.artist.is_empty() { "Unknown artist" } else { t.artist.as_str() };
+                chip_at(&p, pos2(rect.left() + 22.0, rect.center().y), key.as_str(), key_col(key));
+                p.text(pos2(rect.left() + 58.0, rect.top() + 4.0), Align2::LEFT_TOP, title, FontId::proportional(12.0), TXT);
+                let bar = start / 4.0 + 1.0;
                 p.text(
-                    pos2(rect.left() + 50.0, rect.center().y + 1.0),
-                    Align2::LEFT_TOP,
-                    artist,
-                    FontId::proportional(10.5),
+                    pos2(rect.left() + 58.0, rect.bottom() - 4.0),
+                    Align2::LEFT_BOTTOM,
+                    format!("Deck {} · bar {:.0} · {}", lane + 1, bar, fmt_t(*at)),
+                    FontId::proportional(10.0),
                     DIM,
                 );
                 p.text(
-                    pos2(rect.left() + 50.0, rect.bottom() - 4.0),
-                    Align2::LEFT_BOTTOM,
-                    format!("{:.0} BPM", t.bpm),
-                    FontId::proportional(10.0),
-                    MUTED,
-                );
-                p.text(
-                    pos2(rect.right() - 6.0, rect.center().y - 6.0),
+                    pos2(rect.right() - 6.0, rect.center().y),
                     Align2::RIGHT_CENTER,
-                    "In mix",
+                    format!("{:.0} BPM", bpm),
                     FontId::proportional(11.0),
-                    FOCUS,
+                    TXT,
                 );
-                p.text(
-                    pos2(rect.right() - 6.0, rect.center().y + 7.0),
-                    Align2::RIGHT_CENTER,
-                    fmt_t(t.duration),
-                    FontId::proportional(10.0),
-                    MUTED,
-                );
-                let _ = k;
+                }
+                if let Some(Some((preset, col, meta))) = trans_data.get(k) {
+                    let (tr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+                    let dot = tr.left() + 10.0;
+                    let p2 = ui.painter_at(tr);
+                    p2.circle_filled(pos2(dot, tr.center().y), 3.0, *col);
+                    p2.text(
+                        pos2(dot + 10.0, tr.center().y),
+                        Align2::LEFT_CENTER,
+                        format!("{preset} · {meta}"),
+                        FontId::proportional(10.0),
+                        MUTED,
+                    );
+                }
             }
         });
         self.studio_playlist_footer(ui, order.len());

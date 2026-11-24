@@ -472,7 +472,12 @@ impl Library {
     pub fn ext_info(&self, path: &str) -> Option<(crate::import::Source, &crate::import::ExtTrack)> {
         let &(l, t) = self.ext_map.get(path)?; let lib = self.ext.get(l)?.as_ref().ok()?; Some((lib.source, lib.tracks.get(t)?)) }
     pub fn entry(&self, path: &str) -> Option<&Entry> { self.pos.get(path).and_then(|&i| self.index.entries.get(i)) }
-    fn reindex(&mut self) { self.pos = self.index.entries.iter().enumerate().map(|(i, e)| (e.path.clone(), i)).collect(); self.gen += 1; self.path_gen+=1; }
+    pub(crate) fn reindex(&mut self) { self.pos = self.index.entries.iter().enumerate().map(|(i, e)| (e.path.clone(), i)).collect(); self.gen += 1; self.path_gen+=1; }
+    pub(crate) fn abort_scan(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.scanning = false;
+        self.rescan_pending = false;
+    }
     pub fn rescan(&mut self) {
         if self.scanning { self.rescan_pending = true; return; }
         self.cancel.store(true, Ordering::Relaxed); self.cancel = Arc::new(AtomicBool::new(false)); self.analysing = (0, 0);

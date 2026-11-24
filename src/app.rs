@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 const OLIVE: C = C::from_rgb(98, 96, 22);
-const STEM_N: [&str; 4] = ["Drums", "Bass", "Melody", "Vocals"];
+pub(crate) const STEM_N: [&str; 4] = ["Drums", "Bass", "Melody", "Vocals"];
 const HEAD_W: f32 = 132.0;
 const RULER_H: f32 = 30.0;
 const SAMPLE_H: f32 = 48.0;
@@ -215,23 +215,54 @@ impl App {
             if let Some(&(_, _, s, e)) = a.mix.logical_transitions().first() { a.scroll = s - 40.0; a.seek((s + e) / 2.0 - 4.0); }
             a.ppb = 7.5; a.sel = Some(1); a.sel_in = None; a.tab = Tab::Track; a.mix.metronome = true; a.follow = true;
             match std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() {
-                Ok("arrangement") | Ok("track") => { a.top = 3; a.library_ui.side_tab = 1; a.sel = Some(1); a.sel_in = None; a.tab = Tab::Track; }
+                Ok("arrangement") | Ok("track") => {
+                    a.top = 3;
+                    a.library_ui.side_tab = 1;
+                    a.sel = Some(1);
+                    a.sel_in = None;
+                    a.tab = Tab::Track;
+                    a.transition_audition = None;
+                }
                 Ok("transition") => {
                     if let Some(&(_, i, s, e)) = a.mix.logical_transitions().first() {
-                        a.sel_in = Some(i); a.sel = None; a.tab = Tab::Transition; a.scroll = s - 20.0; a.seek((s + e) * 0.5);
+                        a.top = 3;
+                        a.library_ui.side_tab = 1;
+                        a.sel_in = Some(i);
+                        a.sel = None;
+                        a.tab = Tab::Transition;
+                        a.scroll = s - 20.0;
+                        a.seek((s + e) * 0.5);
                     }
                 }
                 Ok("master") => { a.tab = Tab::Master; a.sel = None; }
                 Ok("library") => {
-                    a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_key = true; a.lib_bpm = true; a.lib_pct = 6.0;
-                    a.lib.cfg.folders = vec![demo_dir.display().to_string()];
-                    a.lib.rescan();
+                    a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_key = false; a.lib_bpm = false; a.lib_pct = 6.0;
+                    let demo_s = demo_dir.display().to_string();
+                    a.lib.cfg.folders = vec![demo_s.clone()];
+                    a.lib.cfg.imports.clear();
+                    a.lib.index.entries.retain(|e| e.folder == demo_s || std::path::Path::new(&e.path).starts_with(demo_dir));
+                    a.lib.states.retain(|k, _| k == &demo_s);
+                    a.library_ui.tree_key = None;
+                    a.lib.abort_scan();
+                    a.seed_library_demo_catalog(demo_dir);
+                    a.seed_library_demo_metadata();
+                    a.library_ui.demo_meta_done = true;
                     a.refresh_library_view();
                     a.lib_sort = crate::library::SortCol::Title;
                     a.refresh_library_view();
                     let pick: Vec<_> = a.lib_view.iter().take(2).filter_map(|&i| a.library_entries().get(i).map(|e| e.path.clone())).collect();
                     a.lib_sel = pick.iter().cloned().collect();
                     a.lib_anchor = pick.first().cloned();
+                    if let Some(p) = pick.first().cloned().filter(|p| a.store.contains_key(p)) {
+                        let title = a
+                            .library_entries()
+                            .iter()
+                            .find(|e| e.path == *p)
+                            .map(|e| if e.title.is_empty() { e.filename().to_string() } else { e.title.clone() })
+                            .unwrap_or_else(|| "Preview".into());
+                        a.toggle_listen(p.clone(), title, ctx);
+                        let _ = a.out.tx.send(Cmd::Play(false));
+                    }
                 }
                 // Preview a demo file, paused so a screenshot makes no sound.
                 Ok("listen") => { a.top = 2; a.tab = Tab::Library; a.sel = None; let p=a.mix.tracks[0].path.clone(); a.toggle_listen(p,"Kick Test A minor.wav".into(),ctx); let _=a.out.tx.send(Cmd::Play(false)); }
@@ -263,7 +294,13 @@ impl App {
                     t.auto=vec![vec![(rel-16.0,1.0),(rel,0.75),(rel+16.0,1.0)]];
                     a.seek(start);
                 }
-                Ok("autoorder") => { a.library_ui.side_tab = 1; a.top=3; a.tab=Tab::Playlist; a.sel=Some(1); a.auto_order(); }
+                Ok("autoorder") => {
+                    a.library_ui.side_tab = 1;
+                    a.top = 3;
+                    a.tab = Tab::Playlist;
+                    a.sel = Some(1);
+                    a.library_ui.capture_autoorder_menu = true;
+                }
                 Ok("empty") => {
                     a.mix.tracks.clear(); a.store.clear(); a.sel=None; a.sel_in=None; a.tab=Tab::Playlist; a.top=3;
                     a.mix.name="Untitled mix".into(); a.lib.scanning=false; a.lib.analysing=(0,0);
@@ -717,7 +754,7 @@ impl App {
                 self.control_bar_edit(ui);
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.spacing_mut().item_spacing.x = 4.0;
                 if ui
                     .add(egui::Button::new(egui::RichText::new("Zoom to Fit").size(11.0)))
                     .on_hover_text("Fit the whole mix in view")
@@ -768,7 +805,6 @@ impl App {
                 }
             });
         });
-        ui.separator();
     }
 
     pub(super) fn overlap_outros_with_intros(&mut self) {
@@ -985,12 +1021,20 @@ impl App {
 impl App {
     fn timeline(&mut self, ui: &mut egui::Ui) {
         if self.arrangement_locked() {self.samples.copy=None;self.samples.box_origin=None;self.stem_volume_drag=None;self.drag=None;self.tl_drag=None;self.grid_drag=None;self.bm_drag=None;}
-        self.timeline_toolbar(ui);
         let full = ui.available_rect_before_wrap();
-        let mini_h = 14.0;
-        let mini = Rect::from_min_max(full.min, pos2(full.right(), full.top() + mini_h));
-        let area = Rect::from_min_max(pos2(full.left(), mini.bottom()), full.max);
+        let mini_h = 12.0;
+        let tool_h = 34.0;
+        let head = Rect::from_min_max(full.min, pos2(full.left() + HEAD_W, full.top() + mini_h + tool_h));
+        let mini = Rect::from_min_max(pos2(head.right(), full.top()), pos2(full.right(), full.top() + mini_h));
+        let tool_strip = Rect::from_min_max(pos2(head.right(), mini.bottom()), pos2(full.right(), mini.bottom() + tool_h));
+        let area = Rect::from_min_max(pos2(full.left(), tool_strip.bottom()), full.max);
         let tl_x0 = area.left() + HEAD_W; let tl_w = area.right() - tl_x0;
+        egui::Frame::none().fill(BG_WELL).show(ui, |ui| {
+            ui.allocate_ui_at_rect(tool_strip, |ui| {
+                ui.set_height(tool_h);
+                self.timeline_toolbar(ui);
+            });
+        });
         let bpm = self.mix.bpm;
         let len = self.mix.length_beats().max(64.0);
         let beat_now = self.beat();
@@ -1008,8 +1052,10 @@ impl App {
         let xb = |x: f32| scroll + ((x - tl_x0) / ppb) as f64;
         let p = ui.painter().clone();
 
-        // minimap / overview
-        p.rect_filled(mini, 0.0, PANEL);
+        p.rect_filled(head, 0.0, BG_WELL);
+        p.rect_filled(tool_strip, 0.0, BG_WELL);
+        // minimap / overview (timeline column only — not a yellow band above the ruler)
+        p.rect_filled(mini, 0.0, C::from_rgb(22, 23, 26));
         let mw = mini.width() - 20.0; let mxf = |b: f64| mini.left() + 10.0 + (b / len) as f32 * mw;
         p.line_segment([pos2(mini.left() + 10.0, mini.center().y), pos2(mini.right() - 10.0, mini.center().y)], Stroke::new(1.0_f32, LINE));
         for t in &self.mix.tracks { p.circle_filled(pos2(mxf(t.vis_start(bpm)), mini.center().y), 2.0, DIM); }
@@ -1089,17 +1135,20 @@ impl App {
             if cr.right() < tl_x0 || cr.left() > area.right() { continue; }
             let vis = clip(cr);
             let sample = t.lane >= 2;
-            let base = C::from_rgb(26, 27, 30);
-            let title_h = if sample { 11.0 } else { 18.0 };
+            let selected = self.sel == Some(ti) || (sample && self.samples.selected.contains(&ti));
+            let body_col = C::from_rgb(20, 21, 24);
+            let title_h = if sample { 14.0 } else { 18.0 };
             let tr = Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + title_h));
-            tp.rect_filled(Rect::from_min_max(pos2(cr.left(), tr.bottom()), cr.max), 0.0, if sample { base.gamma_multiply(0.35) } else { C::from_rgb(20, 21, 24) });
-            tp.rect_filled(tr, 0.0, C::from_rgb(30, 31, 34));
-            tp.rect_filled(Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + 2.0)), 0.0, key_col(&t.key).gamma_multiply(0.55));
-            let mut x = vis.left() + 3.0;
-            if !sample { let kr = Rect::from_min_size(pos2(x, tr.top() + 1.5), vec2(22.0, title_h - 3.0));
-                let kc = key_col(&t.key);
-                tp.rect_filled(kr, 3.0, kc.gamma_multiply(0.75));
-                tp.text(kr.center(), Align2::CENTER_CENTER, &t.key, FontId::proportional(9.0), if kc.g() > 140 { C::BLACK } else { TXT }); x += 26.0; }
+            tp.rect_filled(Rect::from_min_max(pos2(cr.left(), tr.bottom()), cr.max), 0.0, body_col);
+            let kc = key_col(&t.key);
+            tp.rect_filled(tr, 0.0, kc.gamma_multiply(if selected { 0.32 } else { 0.22 }));
+            let mut x = vis.left() + 6.0;
+            if !sample {
+                let kr = Rect::from_min_size(pos2(x, tr.top() + 2.0), vec2(22.0, title_h - 4.0));
+                tp.rect_filled(kr, 3.0, kc.gamma_multiply(0.72));
+                tp.text(kr.center(), Align2::CENTER_CENTER, &t.key, FontId::proportional(9.0), if kc.g() > 140 { C::BLACK } else { TXT });
+                x += 26.0;
+            }
             if let Some(pr) = self.stem_prog.get(&t.path) { let v = pr.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0; let dl = self.dl_prog.load(std::sync::atomic::Ordering::Relaxed);
                 let txt = if v == 0.0 && dl > 0 && dl < 1000 { format!("○ Downloading stem model {:.0}%", dl as f32 / 10.0) } else { format!("○ Separating stems {v:.0}%") };
                 let w = 190.0; let r = Rect::from_min_size(pos2(vis.right() - w - 4.0, tr.top() + 1.0), vec2(w, title_h - 2.0));
@@ -1146,8 +1195,12 @@ impl App {
                             tp.line_segment([pos2(px + 0.5, ly - a), pos2(px + 0.5, ly + a)], Stroke::new(1.0_f32, if muted { C::from_rgba_unmultiplied(150, 150, 150, 60) } else { col }));
                         }
                     } else if sample {
-                        let a = f(m[0]).max(f(m[1])) * (wave.height() - 2.0);
-                        tp.line_segment([pos2(px + 0.5, wave.bottom() - a), pos2(px + 0.5, wave.bottom())], Stroke::new(1.0_f32, if t.lane == 2 { C::from_rgb(30, 50, 150) } else { C::from_rgb(150, 180, 255) }));
+                        let lo = f(m[0]) * (wave.height() * 0.5);
+                        let mi = f(m[1]) * (wave.height() * 0.35);
+                        let wave_col = C::from_rgb(56, 196, 184);
+                        let hi_col = C::from_rgb(220, 232, 238);
+                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, wave_col));
+                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(1.0_f32, hi_col.gamma_multiply(0.75)));
                     } else {
                         let (lo, mi) = (f(m[0]) * hh, f(m[1]) * hh * 0.65);
                         let wave_col=C::from_rgb(56, 196, 184);
@@ -1218,8 +1271,11 @@ impl App {
                 tp.line_segment([pos2(x,wave.top()),pos2(x,wave.bottom())],Stroke::new(1.5_f32,ACCENT));
                 tp.text(pos2(x+3.0,wave.top()+3.0),Align2::LEFT_TOP,"|",FontId::proportional(10.0),ACCENT);
             } }
-            let selected = self.sel == Some(ti) || (sample && self.samples.selected.contains(&ti));
-            tp.rect_stroke(cr, 2.0, Stroke::new(if selected { 2.0_f32 } else { 1.0 }, if selected { FOCUS } else { C::from_rgb(48, 50, 56) }));
+            if selected {
+                tp.rect_stroke(cr, 2.0, Stroke::new(1.5_f32, FOCUS));
+            } else {
+                tp.rect_stroke(cr, 2.0, Stroke::new(1.0, C::from_rgb(48, 50, 56)));
+            }
             let resp = ui.interact(vis, ui.id().with(("clip", ti)), Sense::click_and_drag());
             if let Some(pp) = resp.interact_pointer_pos() {
                 let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
@@ -1407,14 +1463,14 @@ impl App {
             if x1 <= x0 + 4.0 { continue; }
             let sel = self.sel_in == Some(i);
             let chip = Rect::from_min_max(pos2(x0 + 2.0, trans_strip.top() + 3.0), pos2(x1 - 2.0, trans_strip.bottom() - 3.0));
-            let (sc, col, lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
-            let _ = sc;
+            let (_, col, lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
             tp.rect_filled(chip, 4.0, if sel { C::from_rgb(52, 54, 60) } else { C::from_rgb(38, 40, 44) });
             tp.rect_stroke(chip, 4.0, Stroke::new(if sel { 1.5_f32 } else { 1.0 }, if sel { FOCUS } else { LINE }));
             tp.circle_filled(pos2(chip.left() + 8.0, chip.center().y), 3.5, compat_col(col));
             let tt = &self.mix.tracks[i].trans;
             let nst = tt.stems.iter().filter(|m| **m != StemMode::Crossfade).count();
-            let label = format!("{} · {lab}", tt.preset.name());
+            let bars = ((e - s) / 4.0).round();
+            let label = format!("{} · {:.0} bars", tt.preset.name(), bars);
             tp.text(
                 pos2(chip.left() + 16.0, chip.center().y),
                 Align2::LEFT_CENTER,
@@ -1445,8 +1501,6 @@ impl App {
                         }
                     }
                 }
-                let veil = Rect::from_min_max(pos2(x0, d1.top()), pos2(x1, d2.bottom()));
-                tp.rect_filled(veil, 0.0, C::from_rgba_unmultiplied(84, 104, 236, 18));
             }
             let resp = ui.interact(clip(chip), ui.id().with(("tr", k)), Sense::click_and_drag());
             if resp.clicked() {
@@ -1883,20 +1937,38 @@ impl App {
             let path=t.path.clone();
             let missing=!self.store.contains_key(&path);
             ui.horizontal(|ui| {
-                chip(ui,t.key.clone(),key_col(&t.key));
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y=0.0;
-                    ui.label(egui::RichText::new(&t.title).size(15.0).strong().color(TXT)).on_hover_text(&path);
-                    ui.label(egui::RichText::new(if t.artist.is_empty(){"Unknown artist"}else{&t.artist}).size(12.0).color(DIM));
-                });
-                ui.add_space(8.0);
-                chip(ui,format!("{:.2} BPM",t.bpm),ACCENT);
-                chip(ui,format!("Deck {}",t.lane+1),DIM);
-                let bar=t.start_beat/4.0+1.0;
-                chip(ui,format!("Bar {:.0}",bar),MUTED);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
-                    if theme::seg_button(ui,"Beatgrid",seg==1).clicked() {seg=1;}
-                    if theme::seg_button(ui,"Track",seg==0).clicked() {seg=0;}
+                chip(ui, t.key.clone(), key_col(&t.key));
+                let bar = t.start_beat / 4.0 + 1.0;
+                let unit = if t.artist.is_empty() {
+                    format!("Deck {} Unit", t.lane + 1)
+                } else {
+                    t.artist.clone()
+                };
+                ui.label(
+                    egui::RichText::new(format!("{} / {}", t.title, unit))
+                        .size(14.0)
+                        .strong()
+                        .color(TXT),
+                )
+                .on_hover_text(&path);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{:.1} BPM · {} · Deck {} · bar {:.0}",
+                        t.bpm,
+                        fmt_t(t.duration),
+                        t.lane + 1,
+                        bar
+                    ))
+                    .size(11.5)
+                    .color(DIM),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if theme::seg_button(ui, "Beatgrid", seg == 1).clicked() {
+                        seg = 1;
+                    }
+                    if theme::seg_button(ui, "Track", seg == 0).clicked() {
+                        seg = 0;
+                    }
                 });
             });
             if missing {
@@ -2130,7 +2202,11 @@ impl App {
             self.sel_in=Some(incoming);
             if self.beat_check.as_ref().is_some_and(|s|s.incoming!=incoming || self.alignment_stamp(incoming).as_ref()!=Some(&s.stamp)) { self.beat_check=None; }
             let busy=self.beat_check.as_ref().is_some_and(|s|s.result.is_none());
-            let auto_btn = if compact { egui::Button::new("Auto-align B") } else { egui::Button::new(egui::RichText::new("⟲ Auto-align B").color(BG)).fill(ACCENT) };
+            let auto_btn = if compact {
+                egui::Button::new(egui::RichText::new("Auto-align B").color(TXT)).fill(FOCUS)
+            } else {
+                egui::Button::new(egui::RichText::new("⟲ Auto-align B").color(BG)).fill(FOCUS)
+            };
             if ui.add_enabled(!busy, auto_btn).on_hover_text("Measure the overlap and, when the attacks agree, correct the incoming grid's offset (and tempo drift) in one step. Measures again afterwards to verify. One Undo restores it.").clicked() { self.request_beat_check(incoming,ui.ctx(),true); }
             if busy {
                 ui.spinner();
@@ -2143,13 +2219,41 @@ impl App {
                 if self.tab!=Tab::Compare && ui.button("Fine-tune in Compare…").on_hover_text("Waveforms side by side with two manual anchors").clicked(){self.open_comparison(incoming);}
             }
         });
-        ui.horizontal_wrapped(|ui| {
-            let editable=!self.arrangement_locked() && self.mix.tracks[incoming].sections.is_empty();
-            ui.label("Nudge B:").on_hover_text("Shortcut: , and . (hold Shift for 10 ms)");
-            for (label,ms,tip) in [("⏪ 10 ms",10.0,"B earlier by 10 ms"),("◀ 1 ms",1.0,"B earlier by 1 ms"),("1 ms ▶",-1.0,"B later by 1 ms"),("10 ms ⏩",-10.0,"B later by 10 ms")] {
-                if ui.add_enabled(editable,egui::Button::new(label)).on_hover_text(tip).clicked() { self.nudge_incoming(incoming,ms); }
-            }
-        });
+        if compact {
+            ui.horizontal(|ui| {
+                let editable = !self.arrangement_locked() && self.mix.tracks[incoming].sections.is_empty();
+                ui.label(egui::RichText::new("Nudge B").size(10.5).color(DIM));
+                for (label, ms, tip) in [
+                    ("−10 ms", 10.0, "B earlier by 10 ms"),
+                    ("−1 ms", 1.0, "B earlier by 1 ms"),
+                    ("+1 ms", -1.0, "B later by 1 ms"),
+                    ("+10 ms", -10.0, "B later by 10 ms"),
+                ] {
+                    if ui
+                        .add_enabled(editable, egui::Button::new(label).small())
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        self.nudge_incoming(incoming, ms);
+                    }
+                }
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                let editable = !self.arrangement_locked() && self.mix.tracks[incoming].sections.is_empty();
+                ui.label("Nudge B:").on_hover_text("Shortcut: , and . (hold Shift for 10 ms)");
+                for (label, ms, tip) in [
+                    ("⏪ 10 ms", 10.0, "B earlier by 10 ms"),
+                    ("◀ 1 ms", 1.0, "B earlier by 1 ms"),
+                    ("1 ms ▶", -1.0, "B later by 1 ms"),
+                    ("10 ms ⏩", -10.0, "B later by 10 ms"),
+                ] {
+                    if ui.add_enabled(editable, egui::Button::new(label)).on_hover_text(tip).clicked() {
+                        self.nudge_incoming(incoming, ms);
+                    }
+                }
+            });
+        }
         if let Some(result)=self.beat_check.as_ref().and_then(|s|s.result.clone()) {
             match result {
                 Err(e)=>{ ui.colored_label(C::LIGHT_YELLOW,e); },
