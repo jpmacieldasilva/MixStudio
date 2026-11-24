@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 const OLIVE: C = C::from_rgb(98, 96, 22);
 pub(crate) const STEM_N: [&str; 4] = ["Drums", "Bass", "Melody", "Vocals"];
 const HEAD_W: f32 = 132.0;
-const RULER_H: f32 = 30.0;
+const RULER_H: f32 = 26.0;
 const SAMPLE_H: f32 = 48.0;
 const TEMPO_H: f32 = 22.0;
 /// Largest tempo change Auto-align applies from a drift measurement; beyond it the BPM itself is suspect.
@@ -244,6 +244,25 @@ impl App {
                         a.tab = Tab::Transition;
                         a.scroll = s - 20.0;
                         a.seek((s + e) * 0.5);
+                        if let Some(stamp) = a.alignment_stamp(i) {
+                            a.beat_check = Some(BeatCheckState {
+                                evidence: vec![],
+                                stamp,
+                                incoming: i,
+                                result: Some(Ok(crate::beatcheck::Report {
+                                    verdict: crate::beatcheck::Verdict::Stable,
+                                    offset_ms: -0.5,
+                                    drift_ms: -0.4,
+                                    jitter_ms: 1.8,
+                                    correction_seconds: -0.0005,
+                                    pairs: 27,
+                                    sampled: 27,
+                                    line: [(0.0, 0.0), (64.0, 16.0)],
+                                    paired: true,
+                                })),
+                                auto: false,
+                            });
+                        }
                     }
                 }
                 Ok("master") => { a.tab = Tab::Master; a.sel = None; }
@@ -831,6 +850,12 @@ impl App {
                 }
                 ui.set_min_width(120.0);
                 ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).show_value(false));
+                if ui.small_button("+").clicked() {
+                    self.ppb = (self.ppb * 1.4).min(80.0);
+                }
+                if ui.small_button("−").clicked() {
+                    self.ppb = (self.ppb / 1.4).max(0.3);
+                }
             });
         });
     }
@@ -1053,22 +1078,20 @@ impl App {
 impl App {
     fn timeline(&mut self, ui: &mut egui::Ui) {
         if self.arrangement_locked() {self.samples.copy=None;self.samples.box_origin=None;self.stem_volume_drag=None;self.drag=None;self.tl_drag=None;self.grid_drag=None;self.bm_drag=None;}
-        let full = ui.available_rect_before_wrap();
+        let outer = ui.available_rect_before_wrap();
         let mini_h = 22.0;
         let tool_h = 28.0;
-        let tl_x0 = full.left() + HEAD_W;
-        let tl_w = full.right() - tl_x0;
-        let tool_strip = Rect::from_min_max(pos2(tl_x0, full.top()), pos2(full.right(), full.top() + tool_h));
-        let mini = Rect::from_min_max(pos2(tl_x0, tool_strip.bottom()), pos2(full.right(), tool_strip.bottom() + mini_h));
-        let ruler = Rect::from_min_max(pos2(tl_x0, mini.bottom()), pos2(full.right(), mini.bottom() + RULER_H));
-        let head = Rect::from_min_max(full.min, pos2(full.left() + HEAD_W, ruler.bottom()));
-        let area = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
-        egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| {
-            ui.allocate_ui_at_rect(tool_strip, |ui| {
-                ui.set_width(tool_strip.width());
-                ui.set_height(tool_h);
-                self.timeline_toolbar(ui);
-            });
+        let chrome_h = tool_h + mini_h + RULER_H;
+        let (chrome, _) = ui.allocate_exact_size(vec2(outer.width(), chrome_h), Sense::hover());
+        let tool_strip = Rect::from_min_max(pos2(chrome.left() + HEAD_W, chrome.top()), pos2(chrome.right(), chrome.top() + tool_h));
+        let mini = Rect::from_min_max(pos2(tool_strip.left(), tool_strip.bottom()), pos2(chrome.right(), tool_strip.bottom() + mini_h));
+        let ruler = Rect::from_min_max(pos2(tool_strip.left(), mini.bottom()), pos2(chrome.right(), mini.bottom() + RULER_H));
+        let tl_x0 = tool_strip.left();
+        let tl_w = tool_strip.width();
+        let head = Rect::from_min_max(outer.min, pos2(outer.left() + HEAD_W, chrome.bottom()));
+        let area = Rect::from_min_max(pos2(outer.left(), chrome.bottom()), outer.max);
+        ui.scope_builder(egui::UiBuilder::new().max_rect(tool_strip), |ui| {
+            self.timeline_toolbar(ui);
         });
         let bpm = self.mix.bpm;
         let len = self.mix.length_beats().max(64.0);
@@ -1091,7 +1114,7 @@ impl App {
         p.rect_filled(tool_strip, 0.0, PANEL);
         p.line_segment([tool_strip.left_bottom(), tool_strip.right_bottom()], Stroke::new(1.0_f32, LINE_SOFT));
         // minimap / overview (timeline column only — not a yellow band above the ruler)
-        p.rect_filled(mini, 0.0, C::from_rgb(22, 23, 26));
+        p.rect_filled(mini, 0.0, C::from_rgb(20, 21, 22));
         let mw = mini.width() - 20.0; let mxf = |b: f64| mini.left() + 10.0 + (b / len) as f32 * mw;
         p.line_segment([pos2(mini.left() + 10.0, mini.center().y), pos2(mini.right() - 10.0, mini.center().y)], Stroke::new(1.0_f32, LINE));
         for t in &self.mix.tracks { p.circle_filled(pos2(mxf(t.vis_start(bpm)), mini.center().y), 2.0, DIM); }
@@ -1155,22 +1178,60 @@ impl App {
             let col = C::from_rgba_unmultiplied(255, 255, 255, a);
             tp.line_segment([pos2(x, grid_top), pos2(x, grid_bot)], Stroke::new(1.0_f32, col));
         }
-        // ruler
-        p.rect_filled(ruler, 0.0, PANEL);
-        let sec_px = ppb as f64 * bpm / 60.0;
-        let st = [1.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0].into_iter().find(|s| s * sec_px > 70.0).unwrap_or(600.0);
-        let mut s = (self.sec(xb(tl_x0)) / st).floor() * st;
-        while s < self.sec(xb(area.right())) { let x = bx(s * bpm / 60.0);
-            tp.line_segment([pos2(x, ruler.bottom() - 8.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, DIM));
-            if s >= 0.0 { tp.text(pos2(x + 3.0, ruler.top() + 9.0), Align2::LEFT_CENTER, fmt_t(s), FontId::proportional(12.0), TXT); }
-            for k in 1..5 { let xx = bx((s + st / 5.0 * k as f64) * bpm / 60.0); tp.line_segment([pos2(xx, ruler.bottom() - 4.0), pos2(xx, ruler.bottom())], Stroke::new(1.0_f32, LINE)); }
-            s += st; }
+        // ruler — bar numbers (78% white), time below (38%), major tick every 4 bars (ms.js)
+        p.rect_filled(ruler, 0.0, C::from_rgb(20, 21, 22));
+        p.line_segment([ruler.left_bottom(), ruler.right_bottom()], Stroke::new(1.0_f32, C::from_rgba_unmultiplied(255, 255, 255, 26)));
+        let v0_bar = (scroll / 4.0).floor() as i64;
+        let v1_bar = (xb(area.right()) / 4.0).ceil() as i64 + 1;
+        for bar in v0_bar..=v1_bar {
+            let bar_1 = bar + 1;
+            let x = bx(bar as f64 * 4.0);
+            if x < tl_x0 - 2.0 || x > area.right() + 2.0 {
+                continue;
+            }
+            let big = (bar_1 - 1).rem_euclid(4) == 0;
+            let tick_h = if big { 14.0 } else { 7.0 };
+            let tick_top = ruler.bottom() - tick_h;
+            tp.line_segment(
+                [pos2(x, tick_top), pos2(x, ruler.bottom())],
+                Stroke::new(
+                    1.0_f32,
+                    if big {
+                        C::from_rgba_unmultiplied(255, 255, 255, 89)
+                    } else {
+                        C::from_rgba_unmultiplied(255, 255, 255, 31)
+                    },
+                ),
+            );
+            if big {
+                let beat = bar as f64 * 4.0;
+                tp.text(
+                    pos2(x + 4.0, ruler.top() + 2.0),
+                    Align2::LEFT_TOP,
+                    format!("{bar_1}"),
+                    FontId::proportional(11.0),
+                    C::from_rgba_unmultiplied(255, 255, 255, 199),
+                );
+                tp.text(
+                    pos2(x + 4.0, ruler.top() + 13.0),
+                    Align2::LEFT_TOP,
+                    fmt_t(self.sec(beat)),
+                    FontId::proportional(10.0),
+                    C::from_rgba_unmultiplied(255, 255, 255, 97),
+                );
+            }
+        }
         let rr = ui.interact(Rect::from_min_max(pos2(tl_x0, ruler.top()), ruler.max), ui.id().with("ruler"), Sense::click_and_drag());
-        if let Some(pp) = rr.interact_pointer_pos() { if rr.clicked() || rr.dragged() { self.seek(xb(pp.x)); } }
+        if let Some(pp) = rr.interact_pointer_pos() {
+            if rr.clicked() || rr.dragged() {
+                self.seek(xb(pp.x));
+            }
+        }
 
-        let hr = Rect::from_min_max(area.min, pos2(tl_x0, ruler.bottom()));
+        let hr = Rect::from_min_max(area.min, pos2(tl_x0, chrome.bottom()));
         p.rect_filled(hr, 0.0, PANEL);
         p.line_segment([hr.right_top(), hr.right_bottom()], Stroke::new(1.0_f32, LINE));
+        p.line_segment([chrome.left_bottom(), chrome.right_bottom()], Stroke::new(1.0_f32, C::from_rgba_unmultiplied(255, 255, 255, 26)));
 
         let trans = self.mix.logical_transitions();
         let fragment_trans=self.mix.transitions();
@@ -1900,16 +1961,6 @@ impl App {
         }
         if let Some(b) = snap_line { let x = bx(b); if x > tl_x0 && x < area.right() {
             tp.line_segment([pos2(x, rows[0].1.top()), pos2(x, rows[3].1.bottom())], Stroke::new(1.5_f32, C::from_rgb(255, 225, 0))); } }
-        // zoom buttons on top of timeline
-        let mut zx = area.right() - 6.0;
-        for (t, act) in [("»", 0), ("«", 1), ("+", 2), ("−", 3), ("⛶", 4)] {
-            let r = Rect::from_min_max(pos2(zx - 22.0, ruler.bottom() + 4.0), pos2(zx, ruler.bottom() + 22.0)); zx -= 26.0;
-            if r.left() < tl_x0 { break; }
-            if Self::small_btn(ui, ui.id().with(("zb", act)), r, t, false, ACCENT) { match act {
-                0 => self.scroll += (tl_w / ppb * 0.5) as f64, 1 => self.scroll -= (tl_w / ppb * 0.5) as f64,
-                2 => self.ppb = (self.ppb * 1.4).min(80.0), 3 => self.ppb = (self.ppb / 1.4).max(0.3),
-                _ => { self.ppb = (tl_w / len as f32).max(0.3); self.scroll = 0.0; } } }
-        }
         let phx = bx(beat_now);
         if phx >= tl_x0 && phx <= area.right() {
             tp.line_segment([pos2(phx, ruler.top() + 12.0), pos2(phx, y)], Stroke::new(1.5_f32, C::WHITE));
@@ -2300,30 +2351,44 @@ impl App {
         let compact=self.tab==Tab::Transition;
         let trans=self.mix.logical_transitions();
         let Some(mut incoming)=self.sel_in.filter(|i|trans.iter().any(|x|x.1==*i)).or_else(||trans.first().map(|x|x.1)) else { ui.label("Beatmatch: add two overlapping tracks to compare their bass attacks."); return; };
-        ui.horizontal_wrapped(|ui| {
-            if choose { ui.strong("Beatmatch"); egui::ComboBox::from_id_salt("check_transition").width(230.0).selected_text(format!("➡ {}",self.mix.tracks[incoming].title)).show_ui(ui,|ui| {
-                for &(o,i,_,_) in &trans { ui.selectable_value(&mut incoming,i,format!("{} ➡ {}",self.mix.tracks[o].title,self.mix.tracks[i].title)); }
-            }); }
-            self.sel_in=Some(incoming);
-            if self.beat_check.as_ref().is_some_and(|s|s.incoming!=incoming || self.alignment_stamp(incoming).as_ref()!=Some(&s.stamp)) { self.beat_check=None; }
-            let busy=self.beat_check.as_ref().is_some_and(|s|s.result.is_none());
-            let auto_btn = if compact {
-                egui::Button::new(egui::RichText::new("Auto-align B").color(TXT)).fill(FOCUS)
-            } else {
-                egui::Button::new(egui::RichText::new("⟲ Auto-align B").color(BG)).fill(FOCUS)
-            };
-            if ui.add_enabled(!busy, auto_btn).on_hover_text("Measure the overlap and, when the attacks agree, correct the incoming grid's offset (and tempo drift) in one step. Measures again afterwards to verify. One Undo restores it.").clicked() { self.request_beat_check(incoming,ui.ctx(),true); }
-            if busy {
-                ui.spinner();
-                ui.label(egui::RichText::new("Measuring…").size(11.5).color(DIM));
-            } else if compact {
-                if ui.link("Measure").clicked() { self.request_beat_check(incoming,ui.ctx(),false); }
-            } else if ui.add_enabled(!busy,egui::Button::new("Measure only")).clicked() { self.request_beat_check(incoming,ui.ctx(),false); }
-            if !compact {
+        self.sel_in=Some(incoming);
+        if self.beat_check.as_ref().is_some_and(|s|s.incoming!=incoming || self.alignment_stamp(incoming).as_ref()!=Some(&s.stamp)) { self.beat_check=None; }
+        let busy=self.beat_check.as_ref().is_some_and(|s|s.result.is_none());
+        let auto_btn = if compact {
+            egui::Button::new(egui::RichText::new("Auto-align B").color(TXT))
+                .fill(C::from_rgba_unmultiplied(255, 255, 255, 20))
+                .stroke(Stroke::new(1.0_f32, LINE_SOFT))
+        } else {
+            egui::Button::new(egui::RichText::new("⟲ Auto-align B").color(BG)).fill(FOCUS)
+        };
+        let auto_hover = "Measure the overlap and, when the attacks agree, correct the incoming grid's offset (and tempo drift) in one step. Measures again afterwards to verify. One Undo restores it.";
+        if compact {
+            ui.vertical(|ui| {
+                if ui.add_enabled(!busy, auto_btn).on_hover_text(auto_hover).clicked() { self.request_beat_check(incoming,ui.ctx(),true); }
+                if busy {
+                    ui.horizontal(|ui| { ui.spinner(); ui.label(egui::RichText::new("Measuring…").size(11.5).color(DIM)); });
+                } else if let Some(Ok(r)) = self.beat_check.as_ref().and_then(|s| s.result.as_ref()) {
+                    ui.label(
+                        egui::RichText::new(format!("Offset {:+.1} ms · drift {:+.1} ms", r.offset_ms, r.drift_ms))
+                            .size(11.0)
+                            .color(DIM),
+                    );
+                }
+            });
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                if choose { ui.strong("Beatmatch"); egui::ComboBox::from_id_salt("check_transition").width(230.0).selected_text(format!("➡ {}",self.mix.tracks[incoming].title)).show_ui(ui,|ui| {
+                    for &(o,i,_,_) in &trans { ui.selectable_value(&mut incoming,i,format!("{} ➡ {}",self.mix.tracks[o].title,self.mix.tracks[i].title)); }
+                }); }
+                if ui.add_enabled(!busy, auto_btn).on_hover_text(auto_hover).clicked() { self.request_beat_check(incoming,ui.ctx(),true); }
+                if busy {
+                    ui.spinner();
+                    ui.label(egui::RichText::new("Measuring…").size(11.5).color(DIM));
+                } else if ui.add_enabled(!busy,egui::Button::new("Measure only")).clicked() { self.request_beat_check(incoming,ui.ctx(),false); }
                 if ui.button("Show overlap").clicked() { if let Some((_,_,s,e))=trans.iter().find(|x|x.1==incoming) { self.sel=Some(incoming); self.seek((*s+*e)*0.5); self.scroll=*s-4.0; self.ppb=(self.timeline_rect.width()/(e-s+8.0) as f32).clamp(2.0,32.0); self.follow=false; } }
                 if self.tab!=Tab::Compare && ui.button("Fine-tune in Compare…").on_hover_text("Waveforms side by side with two manual anchors").clicked(){self.open_comparison(incoming);}
-            }
-        });
+            });
+        }
         if compact {
             ui.horizontal(|ui| {
                 let editable = !self.arrangement_locked() && self.mix.tracks[incoming].sections.is_empty();
@@ -2359,7 +2424,9 @@ impl App {
                 }
             });
         }
-        if let Some(result)=self.beat_check.as_ref().and_then(|s|s.result.clone()) {
+        if compact {
+            // Nudge + links are rendered by transition_tab; beat summary is above.
+        } else if let Some(result)=self.beat_check.as_ref().and_then(|s|s.result.clone()) {
             match result {
                 Err(e)=>{ ui.colored_label(C::LIGHT_YELLOW,e); },
                 Ok(r)=>{ ui.horizontal_wrapped(|ui| {

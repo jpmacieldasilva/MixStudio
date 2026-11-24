@@ -242,13 +242,6 @@ impl App {
                 if self.transition_audition.is_some() && ui.button("Stop").clicked() {
                     self.stop_transition_audition();
                 }
-                if ui
-                    .add(egui::Button::new(egui::RichText::new("Auto-align").size(11.0)).frame(false))
-                    .on_hover_text("Measure and align incoming grid in the overlap")
-                    .clicked()
-                {
-                    self.request_beat_check(i, ui.ctx(), true);
-                }
             });
         });
         ui.add_space(4.0);
@@ -300,14 +293,15 @@ impl App {
                         }
                     }
                     ui.add_space(6.0);
-                    if ui.link("Reset Curves").on_hover_text("Clear custom volume curves for this transition").clicked() {
+                    if ui
+                        .link(egui::RichText::new("Reset Curves").color(FOCUS))
+                        .on_hover_text("Clear custom volume curves for this transition")
+                        .clicked()
+                    {
                         self.snapshot();
                         let t = &mut self.mix.tracks[i].trans;
                         t.curve_out.clear();
                         t.curve_in.clear();
-                    }
-                    if ui.link("Volume curves…").on_hover_text("Edit outgoing/incoming volume automation").clicked() {
-                        ui.data_mut(|d| d.insert_temp(egui::Id::new("trans_curves_open"), true));
                     }
                 });
             });
@@ -395,8 +389,8 @@ impl App {
                     self.mix.sync_transition(i);
                     self.mix.resolve_ratios();
                 }
-                self.song_gain_control(ui, o, "Gain A");
-                self.song_gain_control(ui, i, "Gain B");
+                self.transition_gain_row(ui, o, "Gain A");
+                self.transition_gain_row(ui, i, "Gain B");
                 let mut prot = self.mix.tracks[i].trans.locked;
                 if ui
                     .checkbox(&mut prot, "Protect")

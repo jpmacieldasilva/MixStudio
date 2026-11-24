@@ -155,7 +155,8 @@ fn edits_and_timeline_clicks_during_a_preview_use_the_mix_position() {
     a.do_undo();
     // A ruler click moves the mix playhead (kept when the preview stops) and leaves the preview where it is.
     frame(&mut a,&ctx,vec![],1000.0);let out=frame(&mut a,&ctx,vec![],1000.0);
-    let pos=out.shapes.iter().find_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape {if t.galley.text()=="0:10" && t.pos.x>200.0{Some(t.pos+t.galley.size()*0.5)}else{None}}else{None}).expect("ruler label");
+    let ruler_time=super::fmt_t(a.sec(16.0));
+    let pos=out.shapes.iter().find_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape {if t.galley.text()==ruler_time && t.pos.x>200.0{Some(t.pos+t.galley.size()*0.5)}else{None}}else{None}).expect("ruler label");
     let preview=a.engine_beat();let pointer=|pressed|egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
     frame(&mut a,&ctx,vec![egui::Event::PointerMoved(pos),pointer(true)],1000.0);frame(&mut a,&ctx,vec![pointer(false)],1000.0);
     let clicked=a.beat();assert!((clicked-10.0).abs()>0.5,"the click must move the mix playhead");assert_eq!(a.engine_beat(),preview,"the click must not move the preview");
