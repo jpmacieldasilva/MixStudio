@@ -10,9 +10,11 @@ mod library_ui;
 mod library_drop;
 mod library_listen;
 mod theme;
+mod color_oklch;
 mod shell;
 mod studio_nav;
 pub(crate) use theme::*;
+use color_oklch::{camelot_hue, clip_body_fill, clip_header_fill, key_badge_fill, key_badge_text, oklch, wave_hi, wave_low, wave_mid};
 use crate::analysis::{self, Analysis, Audio, PEAK_HOP};
 use crate::engine::{self, Cmd, Shared, Snap};
 use crate::model::{Mix, Preset, StemMode, Track};
@@ -167,12 +169,6 @@ fn fmt_t(s: f64) -> String { let s = s.max(0.0) as u64; if s >= 3600 { format!("
 fn key_col(k: &str) -> C {
     let n: f32 = k.trim_end_matches(['A', 'B']).parse().unwrap_or(1.0);
     let (r, g, b) = hsv((n - 1.0) / 12.0, if k.ends_with('A') { 0.35 } else { 0.5 }, 0.95); C::from_rgb(r, g, b)
-}
-/// Dark clip fill with a subtle Camelot key tint (burgundy/teal/etc.).
-fn key_body_tint(k: &str) -> C {
-    let kc = key_col(k);
-    let mix = |base: u8, tint: u8| ((base as f32) * 0.62 + (tint as f32) * 0.38) as u8;
-    C::from_rgb(mix(ROW.r(), kc.r()), mix(ROW.g(), kc.g()), mix(ROW.b(), kc.b()))
 }
 fn hsv(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     let i = (h * 6.0).floor(); let f = h * 6.0 - i; let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
@@ -768,10 +764,10 @@ impl App {
                 .stroke(Stroke::new(1.0_f32, LINE_SOFT))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        if theme::seg_button(ui, "↔ Move", !self.select_sections).on_hover_text("Drag clips (V)").clicked() {
+                        if theme::seg_button(ui, "Move", !self.select_sections).on_hover_text("Drag clips (V)").clicked() {
                             self.select_sections = false;
                         }
-                        if theme::seg_button(ui, "[] Select", self.select_sections).on_hover_text("Drag a range (R)").clicked() {
+                        if theme::seg_button(ui, "Select", self.select_sections).on_hover_text("Drag a range (R)").clicked() {
                             self.select_sections = true;
                             self.drag = None;
                             self.auto_track = None;
@@ -811,9 +807,10 @@ impl App {
             let follow_on = self.follow;
             if ui
                 .add(
-                    egui::Button::new(egui::RichText::new("◎ Follow").size(11.0).color(if follow_on { TXT } else { DIM }))
-                        .fill(C::TRANSPARENT)
-                        .frame(false)
+                    egui::Button::new(egui::RichText::new("Follow").size(11.0).color(if follow_on { TXT } else { DIM }))
+                        .fill(if follow_on { SEG_INNER } else { C::TRANSPARENT })
+                        .stroke(if follow_on { Stroke::new(1.0_f32, FOCUS) } else { Stroke::NONE })
+                        .frame(true)
                         .min_size(vec2(52.0, 26.0)),
                 )
                 .on_hover_text("Follow playhead (F)")
@@ -832,6 +829,7 @@ impl App {
                     self.ppb = (w / self.mix.length_beats().max(64.0) as f32).clamp(0.3, 80.0);
                     self.scroll = 0.0;
                 }
+                ui.set_min_width(120.0);
                 ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).show_value(false));
             });
         });
@@ -1056,17 +1054,18 @@ impl App {
     fn timeline(&mut self, ui: &mut egui::Ui) {
         if self.arrangement_locked() {self.samples.copy=None;self.samples.box_origin=None;self.stem_volume_drag=None;self.drag=None;self.tl_drag=None;self.grid_drag=None;self.bm_drag=None;}
         let full = ui.available_rect_before_wrap();
-        let mini_h = 12.0;
+        let mini_h = 22.0;
         let tool_h = 28.0;
         let tl_x0 = full.left() + HEAD_W;
         let tl_w = full.right() - tl_x0;
-        let mini = Rect::from_min_max(pos2(tl_x0, full.top()), pos2(full.right(), full.top() + mini_h));
-        let tool_strip = Rect::from_min_max(pos2(tl_x0, mini.bottom()), pos2(full.right(), mini.bottom() + tool_h));
-        let ruler = Rect::from_min_max(pos2(tl_x0, tool_strip.bottom()), pos2(full.right(), tool_strip.bottom() + RULER_H));
+        let tool_strip = Rect::from_min_max(pos2(tl_x0, full.top()), pos2(full.right(), full.top() + tool_h));
+        let mini = Rect::from_min_max(pos2(tl_x0, tool_strip.bottom()), pos2(full.right(), tool_strip.bottom() + mini_h));
+        let ruler = Rect::from_min_max(pos2(tl_x0, mini.bottom()), pos2(full.right(), mini.bottom() + RULER_H));
         let head = Rect::from_min_max(full.min, pos2(full.left() + HEAD_W, ruler.bottom()));
         let area = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
-        egui::Frame::none().fill(BG_WELL).show(ui, |ui| {
+        egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0_f32, LINE_SOFT)).show(ui, |ui| {
             ui.allocate_ui_at_rect(tool_strip, |ui| {
+                ui.set_width(tool_strip.width());
                 ui.set_height(tool_h);
                 self.timeline_toolbar(ui);
             });
@@ -1119,7 +1118,10 @@ impl App {
         self.library_ui.geometry=Some(library_drop::Geometry{left:tl_x0,right:area.right(),ppb,scroll,rows:rows.iter().filter(|(l,_)|*l<4).map(|(l,r)|(*l,r.intersect(area))).collect()});
         let clip = |r: Rect| Rect::from_min_max(pos2(r.left().max(tl_x0), r.top()), pos2(r.right().min(area.right()), r.bottom()));
         let tp = p.with_clip_rect(Rect::from_min_max(pos2(tl_x0, area.top()), area.max));
-        for (lane, r) in &rows { p.rect_filled(*r, 0.0, if *lane < 2 { ROW } else { C::from_rgb(28, 29, 33) }); p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, LINE)); }
+        for (lane, r) in &rows {
+            p.rect_filled(*r, 0.0, if *lane < 2 { BG_WELL } else { C::from_rgb(28, 29, 33) });
+            p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, LINE));
+        }
         p.rect_filled(trans_strip, 0.0, C::from_rgb(26, 27, 30));
         p.line_segment([trans_strip.left_bottom(), trans_strip.right_bottom()], Stroke::new(1.0_f32, LINE));
         p.line_segment([trans_strip.left_top(), trans_strip.right_top()], Stroke::new(1.0_f32, LINE));
@@ -1132,23 +1134,26 @@ impl App {
         );
         // empty-area click = seek (registered first so clips on top win)
         let bg = ui.interact(tlrect, ui.id().with("tlbg"), Sense::click_and_drag());
-        // grid
-        let b0 = xb(tl_x0).floor().max(-16.0) as i64; let b1 = xb(area.right()).ceil() as i64;
-        let step = if ppb < 1.5 { 16 } else if ppb < 4.0 { 4 } else { 1 };
-        let beat_grid = C::from_rgba_unmultiplied(255, 255, 255, 15);
-        for b in b0..=b1 {
-            if b.rem_euclid(step) != 0 {
+        // bar grid on tracks (behind clips) — ms.js opacities per bar phase
+        let grid_top = rows[0].1.top();
+        let grid_bot = rows.last().map(|(_, r)| r.bottom()).unwrap_or(area.bottom());
+        let v0_bar = (scroll / 4.0).floor() as i64;
+        let v1_bar = (xb(area.right()) / 4.0).ceil() as i64 + 1;
+        for bar in v0_bar..=v1_bar {
+            let bar_1 = bar + 1;
+            let x = bx(bar as f64 * 4.0);
+            if x < tl_x0 - 1.0 || x > area.right() + 1.0 {
                 continue;
             }
-            let x = bx(b as f64);
-            if b.rem_euclid(4) == 0 {
-                tp.line_segment([pos2(x, ruler.bottom() - 8.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, DIM));
+            let a = if (bar_1 - 1).rem_euclid(16) == 0 {
+                23
+            } else if (bar_1 - 1).rem_euclid(4) == 0 {
+                13
             } else {
-                for lane in 0..2 {
-                    let r = rows[lane].1;
-                    tp.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, beat_grid));
-                }
-            }
+                6
+            };
+            let col = C::from_rgba_unmultiplied(255, 255, 255, a);
+            tp.line_segment([pos2(x, grid_top), pos2(x, grid_bot)], Stroke::new(1.0_f32, col));
         }
         // ruler
         p.rect_filled(ruler, 0.0, PANEL);
@@ -1180,32 +1185,48 @@ impl App {
             let Some((_, an)) = self.store.get(&t.path) else { continue };
             let row = rows[t.lane.min(3)].1;
             let (vs, ve) = (t.vis_start(bpm), t.end(bpm));
-            let cr = Rect::from_min_max(pos2(bx(vs), row.top() + 1.0), pos2(bx(ve), row.bottom() - 1.0));
+            let cr = Rect::from_min_max(pos2(bx(vs), row.top() + 2.0), pos2(bx(ve), row.bottom() - 2.0));
             if cr.right() < tl_x0 || cr.left() > area.right() { continue; }
             let vis = clip(cr);
             let sample = t.lane >= 2;
             let selected = self.sel == Some(ti) || (sample && self.samples.selected.contains(&ti));
-            let body_col = if sample { ROW } else { key_body_tint(&t.key) };
-            let title_h = 14.0;
+            let title_h = 18.0;
             let tr = Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + title_h));
-            tp.rect_filled(cr, 0.0, body_col);
-            let kc = key_col(&t.key);
-            tp.rect_filled(tr, 0.0, C::from_rgb(20, 21, 24));
-            let mut x = vis.left() + 5.0;
+            let clip_round = Rounding::same(6.0);
+            let body_col = if sample { oklch(0.26, 0.04, camelot_hue(&t.key)) } else { clip_body_fill(&t.key) };
+            tp.add(egui::Shape::rect_filled(cr, clip_round, body_col));
+            tp.add(egui::Shape::rect_filled(
+                tr,
+                Rounding { nw: 6.0, ne: 6.0, sw: 0.0, se: 0.0 },
+                if sample { body_col } else { clip_header_fill(&t.key) },
+            ));
+            let mut x = vis.left() + 6.0;
             if !sample {
-                let kr = Rect::from_min_size(pos2(x, tr.top() + 1.0), vec2(20.0, title_h - 2.0));
-                tp.rect_filled(kr, 2.0, kc.gamma_multiply(0.38));
-                tp.text(kr.center(), Align2::CENTER_CENTER, &t.key, FontId::proportional(8.5), if kc.g() > 140 { C::BLACK } else { TXT });
-                x += 24.0;
-                tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, FontId::proportional(10.0), TXT);
-                let tw = tp.layout_no_wrap(t.title.clone(), FontId::proportional(10.0), TXT).size().x;
+                let kr = Rect::from_min_size(pos2(x, tr.top() + 2.5), vec2(26.0, 13.0));
+                tp.add(egui::Shape::rect_filled(kr, Rounding::same(3.0), key_badge_fill(&t.key)));
+                tp.text(
+                    kr.center(),
+                    Align2::CENTER_CENTER,
+                    &t.key,
+                    FontId::proportional(10.0),
+                    key_badge_text(&t.key),
+                );
+                x += 32.0;
+                tp.text(
+                    pos2(x, tr.center().y),
+                    Align2::LEFT_CENTER,
+                    &t.title,
+                    FontId::proportional(11.5),
+                    C::from_rgba_unmultiplied(255, 255, 255, 235),
+                );
+                let tw = tp.layout_no_wrap(t.title.clone(), FontId::proportional(11.5), TXT).size().x;
                 if !t.artist.is_empty() && x + tw + 8.0 < vis.right() - 40.0 {
                     tp.text(
                         pos2(x + tw + 6.0, tr.center().y),
                         Align2::LEFT_CENTER,
                         &t.artist,
-                        FontId::proportional(9.5),
-                        MUTED,
+                        FontId::proportional(11.0),
+                        C::from_rgba_unmultiplied(255, 255, 255, 128),
                     );
                 }
                 x = vis.right();
@@ -1219,17 +1240,19 @@ impl App {
             if sample {
                 tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, FontId::proportional(9.5), TXT);
             }
-            let wave = Rect::from_min_max(pos2(cr.left() + 1.0, tr.bottom() + 2.0), pos2(cr.right() - 1.0, cr.bottom() - 2.0));
+            let wave = Rect::from_min_max(pos2(cr.left() + 1.0, tr.bottom() + 1.0), pos2(cr.right() - 1.0, cr.bottom() - 2.0));
             let cps = an.peak_sr as f64 / PEAK_HOP as f64;
-            let (cy, hh) = (wave.center().y, wave.height() / 2.0);
+            let cy = wave.center().y;
+            let amp = ((cr.height() - title_h - 14.0) / 2.0).max(3.0);
             let mut overlap: Vec<(f64, f64, bool, usize)> = fragment_trans.iter().filter(|x| x.0 == ti || x.1 == ti).map(|x| (x.2, x.3, x.0 == ti, x.1)).collect();
             overlap.dedup_by(|a,b|a.0==b.0 && a.1==b.1 && a.2==b.2);
             let partner = |o: &(f64, f64, bool, usize)| -> usize { if o.2 { o.3 } else { fragment_trans.iter().find(|x| x.1 == ti).map(|x| x.0).unwrap_or(ti) } };
             let my_stems = self.stems.get(&t.path);
             let tstyle = self.mix.trans_stem_style; let tsc = |k: usize| { let c = STEM[k]; match tstyle { 1 => C::from_rgb(c.r() / 2 + 40, c.g() / 2 + 40, c.b() / 2 + 40), 2 => C::from_rgb(255 - c.r(), 255 - c.g(), 255 - c.b()), _ => c } };
             let grid = t.grid();
-            let wave_step = if ppb < 18.0 { 2.5_f32 } else { 1.0_f32 };
-            let wave_scale = if ppb < 18.0 { 0.28_f32 } else if ppb < 40.0 { 0.42_f32 } else { 0.58_f32 };
+            let wave_step = if ppb < 12.0 { 2.0_f32 } else if ppb < 24.0 { 1.5_f32 } else { 1.0_f32 };
+            let w_low = wave_low();
+            let w_mid = wave_mid();
             let mut px = vis.left().floor();
             while px < vis.right() {
                 let (bb0, bb1) = (xb(px), xb((px + wave_step).min(vis.right())));
@@ -1260,16 +1283,15 @@ impl App {
                             tp.line_segment([pos2(px + 0.5, ly - a), pos2(px + 0.5, ly + a)], Stroke::new(1.0_f32, if muted { C::from_rgba_unmultiplied(150, 150, 150, 60) } else { col }));
                         }
                     } else if sample {
-                        let lo = (f(m[0]) * hh * wave_scale).min(hh * 0.45);
-                        let wave_col = C::from_rgb(48, 178, 168).gamma_multiply(0.9);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(0.75_f32, wave_col));
+                        let lo = (f(m[0]) * amp).min(amp);
+                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, w_mid));
                     } else {
-                        let lo = (f(m[0]) * hh * wave_scale).min(hh * 0.48);
-                        let mi = (f(m[1]) * hh * wave_scale * 0.65).min(hh * 0.32);
-                        let wave_col = C::from_rgb(48, 178, 168).gamma_multiply(0.92);
-                        let hi_col = C::from_rgb(200, 212, 218).gamma_multiply(0.65);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(0.75_f32, wave_col));
-                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(0.75_f32, hi_col));
+                        let lo = (f(m[0]) * amp).min(amp);
+                        let mi = (f(m[1]) * amp * 0.65).min(amp * 0.85);
+                        let hi = (f(m[2]) * amp * 0.5).min(amp * 0.6);
+                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, w_low));
+                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(1.0_f32, w_mid));
+                        tp.line_segment([pos2(px + 0.5, cy - hi), pos2(px + 0.5, cy + hi)], Stroke::new(1.0_f32, wave_hi()));
                     }
                 }
                 px += wave_step;
@@ -1287,21 +1309,14 @@ impl App {
                 }
             } }
             if !sample {
-                let every = if ppb * 4.0 > 40.0 { 1 } else if ppb * 4.0 > 10.0 { 4 } else { 16 };
-                let (mut b, mut bar) = (t.start_beat, 1);
-                while b < ve { if (bar - 1) % every == 0 { let x = bx(b); if x > vis.left() && x < vis.right() {
-                    tp.line_segment([pos2(x, tr.bottom()), pos2(x, tr.bottom() + 10.0)], Stroke::new(1.0_f32, DIM));
-                    tp.text(pos2(x + 2.0, tr.bottom() + 5.0), Align2::LEFT_CENTER, format!("{bar}"), FontId::proportional(8.5), DIM); } }
-                    b += 4.0; bar += 1; }
                 let phr = self.mix.phrases(&t.path, &an.sections);
                 let phrases=t.phrase_ranges(phr);
                 for (k,kind,sb,end) in phrases {
-                    let r = Rect::from_min_max(pos2(bx(sb), cr.bottom() - 8.0), pos2(bx(end) - 1.0, cr.bottom())).intersect(cr); if r.width() <= 0.0 { continue; }
-                    let pc = crate::phrase::colour(kind); let kind = (kind as usize).min(4);
-                    tp.rect_filled(r, 0.0, C::from_rgba_unmultiplied(18, 19, 22, 210));
-                    tp.rect_filled(Rect::from_min_size(r.left_top(), vec2(3.0, r.height())), 0.0, C::from_rgb(pc[0], pc[1], pc[2]));
-                    let xm = bx(sb); if xm >= cr.left() && xm <= cr.right() { tp.line_segment([pos2(xm, cr.top()), pos2(xm, cr.bottom())], Stroke::new(1.0_f32, C::from_rgba_unmultiplied(pc[0], pc[1], pc[2], 150))); }
-                    if r.width() > 40.0 { tp.text(pos2(r.left().max(tl_x0) + 3.0, r.center().y), Align2::LEFT_CENTER, crate::phrase::LABELS[kind], FontId::proportional(7.5), C::BLACK); }
+                    let r = Rect::from_min_max(pos2(bx(sb), cr.bottom() - 12.0), pos2(bx(end) - 1.0, cr.bottom())).intersect(cr); if r.width() <= 0.0 { continue; }
+                    let kind = (kind as usize).min(4);
+                    tp.rect_filled(r, 0.0, C::from_rgba_unmultiplied(0, 0, 0, 89));
+                    tp.line_segment([pos2(r.left(), r.top()), pos2(r.left(), r.bottom())], Stroke::new(1.0_f32, C::from_rgba_unmultiplied(255, 255, 255, 31)));
+                    if r.width() > 40.0 { tp.text(pos2(r.left().max(tl_x0) + 4.0, r.center().y + 1.0), Align2::LEFT_CENTER, crate::phrase::LABELS[kind], FontId::proportional(9.5), C::from_rgba_unmultiplied(255, 255, 255, 140)); }
                     if !self.arrangement_locked() && !self.select_sections {
                         let pr = ui.interact(r, ui.id().with(("phrase", ti, k)), Sense::click());
                         let set = |v: Option<Vec<(f64, u8)>>| ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("phr_act"), (t.path.clone(), v)));
@@ -1314,21 +1329,32 @@ impl App {
                         pr.on_hover_text(format!("{} · {} bars — click: next label, right-click: choose", crate::phrase::LABELS[kind], ((end - sb) / 4.0).round()));
                     }
                 }
-                if let Some(cs) = self.mix.cue_marks.get(&t.path) { let oc = C::from_rgb(255, 140, 0); for (s, name) in cs {
-                    for beat in grid.occurrences(*s) { let x = bx(beat); if x < cr.left() || x > cr.right() { continue; }
-                    tp.line_segment([pos2(x, cr.top()), pos2(x, cr.bottom() - 8.0)], Stroke::new(1.0_f32, oc.gamma_multiply(0.8)));
-                    tp.add(egui::Shape::convex_polygon(vec![pos2(x - 4.0, cr.top()), pos2(x + 4.0, cr.top()), pos2(x, cr.top() + 6.0)], oc, Stroke::NONE));
-                    tp.text(pos2(x + 5.0, cr.top() + 5.0), Align2::LEFT_CENTER, name, FontId::proportional(8.5), oc); } } }
+                let beatgrid_tab = ui.ctx().data(|d| d.get_temp::<u8>(egui::Id::new("track_editor_seg")).unwrap_or(0) == 1);
+                if self.tab == Tab::Grid || beatgrid_tab {
+                    if let Some(cs) = self.mix.cue_marks.get(&t.path) {
+                        let oc = C::from_rgb(255, 140, 0);
+                        for (s, name) in cs {
+                            for beat in grid.occurrences(*s) {
+                                let x = bx(beat);
+                                if x < cr.left() || x > cr.right() {
+                                    continue;
+                                }
+                                tp.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(1.0_f32, oc.gamma_multiply(0.55)));
+                                tp.text(pos2(x + 5.0, cr.top() + 5.0), Align2::LEFT_CENTER, name, FontId::proportional(8.5), oc);
+                            }
+                        }
+                    }
+                }
                 for o in &overlap { let x1 = bx(o.1).min(cr.right());
                     for k in 0..4 { let r = Rect::from_min_size(pos2(x1 - 9.0 * (4 - k) as f32 - 3.0, cr.bottom() - 16.0), vec2(7.0, 6.0));
                         tp.rect_filled(r, 1.5, STEM[k].gamma_multiply(0.7)); } }
             }
-            for cut in grid.cuts() { let x=bx(cut); if x>=vis.left() && x<=vis.right() {
-                tp.line_segment([pos2(x,wave.top()),pos2(x,wave.bottom())],Stroke::new(1.0_f32,C::from_rgba_unmultiplied(255,255,255,40)));
-            } }
-            if selected {
-                tp.rect_stroke(cr, 0.0, Stroke::new(1.0_f32, C::from_rgb(210, 214, 222)));
-            }
+            let border = if selected {
+                Stroke::new(2.0_f32, FOCUS)
+            } else {
+                Stroke::new(1.0_f32, C::from_rgba_unmultiplied(255, 255, 255, 26))
+            };
+            tp.add(egui::Shape::rect_stroke(cr, clip_round, border));
             let resp = ui.interact(vis, ui.id().with(("clip", ti)), Sense::click_and_drag());
             if let Some(pp) = resp.interact_pointer_pos() {
                 let (alt, shift) = ui.input(|i| (i.modifiers.alt, i.modifiers.shift));
@@ -1455,23 +1481,43 @@ impl App {
                 }
 
             }
-            if !self.arrangement_locked() && !self.select_sections && t.sections.is_empty() && !sample && ppb >= 22.0 && (bm_mode==BmMode::Grid || (t.beat_mult-1.0).abs()<1e-9) {
-                let k0 = (xb(vis.left()) - t.start_beat).ceil() as i64; let k1 = (xb(vis.right()) - t.start_beat).floor() as i64;
+            let beatgrid_inspector = ui.ctx().data(|d| d.get_temp::<u8>(egui::Id::new("track_editor_seg")).unwrap_or(0) == 1);
+            let show_track_grid = self.tab == Tab::Grid || (selected && beatgrid_inspector);
+            if !self.arrangement_locked() && !self.select_sections && t.sections.is_empty() && !sample && show_track_grid && (bm_mode == BmMode::Grid || (t.beat_mult - 1.0).abs() < 1e-9) {
+                let k0 = (xb(vis.left()) - t.start_beat).ceil() as i64;
+                let k1 = (xb(vis.right()) - t.start_beat).floor() as i64;
+                let grid_col = C::from_rgba_unmultiplied(255, 255, 255, 31);
                 for k in k0..=k1 {
                     let x = bx(t.start_beat + k as f64);
                     let hr = Rect::from_center_size(pos2(x, wave.top() + 7.0), vec2(12.0, 14.0));
                     let r = ui.interact(hr, ui.id().with(("bm", ti, k)), Sense::click_and_drag());
-                    let hot = r.hovered() || r.dragged() || self.bm_drag.as_ref().map_or(false, |d| d.ti == ti && d.k == k);
-                    let col = if hot { bm_col(bm_mode) } else if k.rem_euclid(4) == 0 { C::from_rgb(235, 70, 70) } else { C::from_rgb(230, 210, 120) };
-                    tp.add(egui::Shape::convex_polygon(vec![pos2(x - 5.0, wave.top() + 1.0), pos2(x + 5.0, wave.top() + 1.0), pos2(x, wave.top() + 9.0)], col, Stroke::NONE));
-                    if hot { tp.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(1.5_f32, col)); }
-                    if r.hovered() { bm_hover = Some(pos2(x, wave.top())); ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal); }
-                    if r.drag_started() { bm_act = Some((ti, k, 0)); }
+                    let hot = r.hovered() || r.dragged() || self.bm_drag.as_ref().is_some_and(|d| d.ti == ti && d.k == k);
+                    let col = if hot { bm_col(bm_mode) } else { grid_col };
+                    if hot {
+                        tp.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(1.5_f32, col));
+                    } else if ppb >= 8.0 {
+                        tp.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(1.0_f32, grid_col));
+                    }
+                    if r.hovered() {
+                        bm_hover = Some(pos2(x, wave.top()));
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                    }
+                    if r.drag_started() {
+                        bm_act = Some((ti, k, 0));
+                    }
                     r.context_menu(|ui| {
-                        if ui.button("Set downbeat here").clicked() { bm_act = Some((ti, k, 1)); ui.close_menu(); }
-                        if ui.button("Set first beat here").clicked() { bm_act = Some((ti, k, 2)); ui.close_menu(); }
+                        if ui.button("Set downbeat here").clicked() {
+                            bm_act = Some((ti, k, 1));
+                            ui.close_menu();
+                        }
+                        if ui.button("Set first beat here").clicked() {
+                            bm_act = Some((ti, k, 2));
+                            ui.close_menu();
+                        }
                         ui.separator();
-                        for m in BmMode::ALL { ui.radio_value(&mut bm_mode, m, m.name()); }
+                        for m in BmMode::ALL {
+                            ui.radio_value(&mut bm_mode, m, m.name());
+                        }
                     });
                 }
             }

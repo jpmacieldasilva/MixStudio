@@ -274,8 +274,15 @@ impl App {
         self.library_ui.side_tab = 1;
         self.transition_header(ui, choice, &transitions, o, i, s, e);
         let editable = !self.lock && !self.mix.tracks[i].trans.locked;
-        ui.columns(4, |cols| {
-            cols[0].vertical(|ui| {
+        let stems_ready = [o, i].iter().all(|ti| self.stems.contains_key(&self.mix.tracks[*ti].path));
+        let narrow = ui.ctx().screen_rect().width() < 1320.0;
+        let (w0, w1) = if narrow { (128.0, 292.0) } else { (156.0, 304.0) };
+        let w_rest = (ui.available_width() - w0 - w1 - 24.0).max(240.0);
+        let w_col = (w_rest / 2.0).max(120.0);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_min_width(w0);
+                ui.set_max_width(w0);
                 ui.label(egui::RichText::new("PRESET").size(10.0).color(MUTED).strong());
                 ui.add_space(2.0);
                 ui.add_enabled_ui(editable, |ui| {
@@ -292,7 +299,7 @@ impl App {
                             };
                         }
                     }
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
                     if ui.link("Reset Curves").on_hover_text("Clear custom volume curves for this transition").clicked() {
                         self.snapshot();
                         let t = &mut self.mix.tracks[i].trans;
@@ -304,21 +311,41 @@ impl App {
                     }
                 });
             });
-            cols[1].vertical(|ui| {
-                ui.label(egui::RichText::new("STEMS").size(10.0).color(MUTED).strong());
-                ui.add_space(2.0);
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.set_min_width(w1);
+                ui.set_max_width(w1);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("STEMS").size(10.0).color(MUTED).strong());
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if stems_ready {
+                            ui.label(egui::RichText::new("Ready").size(11.0).color(OK));
+                        }
+                    });
+                });
+                ui.add_space(4.0);
                 ui.add_enabled_ui(editable, |ui| {
                     let mut stems = self.mix.tracks[i].trans.stems;
                     for k in 0..4 {
                         ui.horizontal(|ui| {
-                            ui.set_width(58.0);
-                            ui.label(egui::RichText::new(STEM_N[k]).size(11.0).color(DIM));
-                            for mode in StemMode::ALL {
-                                if theme::seg_button(ui, mode.name(), stems[k] == mode).clicked() && stems[k] != mode {
-                                    self.snapshot();
-                                    stems[k] = mode;
-                                }
-                            }
+                            ui.allocate_ui_with_layout(vec2(52.0, 22.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                ui.label(egui::RichText::new(STEM_N[k]).size(11.0).color(DIM));
+                            });
+                            egui::Frame::none()
+                                .fill(CTRL_FILL)
+                                .rounding(6.0)
+                                .inner_margin(egui::Margin::symmetric(2.0, 1.0))
+                                .show(ui, |ui| {
+                                    ui.set_min_width(w1 - 60.0);
+                                    ui.horizontal(|ui| {
+                                        for mode in StemMode::ALL {
+                                            if theme::seg_button(ui, mode.name(), stems[k] == mode).clicked() && stems[k] != mode {
+                                                self.snapshot();
+                                                stems[k] = mode;
+                                            }
+                                        }
+                                    });
+                                });
                         });
                         ui.add_space(2.0);
                     }
@@ -326,18 +353,11 @@ impl App {
                         self.mix.tracks[i].trans.stems = stems;
                     }
                 });
-                let stems_ready = [o, i].iter().all(|ti| self.stems.contains_key(&self.mix.tracks[*ti].path));
-                ui.label(
-                    egui::RichText::new(if stems_ready {
-                        "Ready"
-                    } else {
-                        "Separate stems to edit lanes"
-                    })
-                    .size(11.0)
-                    .color(if stems_ready { OK } else { DIM }),
-                );
             });
-            cols[2].vertical(|ui| {
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.set_min_width(w_col);
+                ui.set_max_width(w_col);
                 ui.label(egui::RichText::new("OVERLAP").size(10.0).color(MUTED).strong());
                 ui.add_space(2.0);
                 let bars = ((e - s) / 4.0).round() as u32;
@@ -386,7 +406,10 @@ impl App {
                     self.set_transition_protection(i, prot);
                 }
             });
-            cols[3].vertical(|ui| {
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.set_min_width(w_col);
+                ui.set_max_width(w_col);
                 ui.label(egui::RichText::new("BEATMATCH").size(10.0).color(MUTED).strong());
                 ui.add_space(2.0);
                 self.beatmatch_ui(ui, false);
