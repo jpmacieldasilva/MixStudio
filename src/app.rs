@@ -850,11 +850,23 @@ impl App {
                 }
                 ui.set_min_width(120.0);
                 ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).show_value(false));
-                if ui.small_button("+").clicked() {
+                if ui.small_button("+").on_hover_text("Zoom in").clicked() {
                     self.ppb = (self.ppb * 1.4).min(80.0);
                 }
-                if ui.small_button("−").clicked() {
+                if ui.small_button("−").on_hover_text("Zoom out").clicked() {
                     self.ppb = (self.ppb / 1.4).max(0.3);
+                }
+                let page = (self.timeline_rect.width().max(400.0) / self.ppb) as f64 * 0.85;
+                if ui.small_button("›").on_hover_text("Scroll forward").clicked() {
+                    self.scroll = (self.scroll + page).min(self.mix.length_beats().max(64.0));
+                    self.follow = false;
+                }
+                if ui.small_button("‹").on_hover_text("Scroll back").clicked() {
+                    self.scroll = (self.scroll - page).max(-16.0);
+                    self.follow = false;
+                }
+                if ui.small_button("⛶").on_hover_text("Taller deck lanes (Z)").clicked() {
+                    self.vzoom = !self.vzoom;
                 }
             });
         });
@@ -1090,9 +1102,6 @@ impl App {
         let tl_w = tool_strip.width();
         let head = Rect::from_min_max(outer.min, pos2(outer.left() + HEAD_W, chrome.bottom()));
         let area = Rect::from_min_max(pos2(outer.left(), chrome.bottom()), outer.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(tool_strip), |ui| {
-            self.timeline_toolbar(ui);
-        });
         let bpm = self.mix.bpm;
         let len = self.mix.length_beats().max(64.0);
         let beat_now = self.beat();
@@ -1113,6 +1122,10 @@ impl App {
         p.rect_filled(head, 0.0, BG_WELL);
         p.rect_filled(tool_strip, 0.0, PANEL);
         p.line_segment([tool_strip.left_bottom(), tool_strip.right_bottom()], Stroke::new(1.0_f32, LINE_SOFT));
+        // Toolbar widgets after chrome fill — painting PANEL on top was hiding Move|Select|Snap (round 8).
+        ui.scope_builder(egui::UiBuilder::new().max_rect(tool_strip), |ui| {
+            self.timeline_toolbar(ui);
+        });
         // minimap / overview (timeline column only — not a yellow band above the ruler)
         p.rect_filled(mini, 0.0, C::from_rgb(20, 21, 22));
         let mw = mini.width() - 20.0; let mxf = |b: f64| mini.left() + 10.0 + (b / len) as f32 * mw;
@@ -1141,6 +1154,7 @@ impl App {
         self.library_ui.geometry=Some(library_drop::Geometry{left:tl_x0,right:area.right(),ppb,scroll,rows:rows.iter().filter(|(l,_)|*l<4).map(|(l,r)|(*l,r.intersect(area))).collect()});
         let clip = |r: Rect| Rect::from_min_max(pos2(r.left().max(tl_x0), r.top()), pos2(r.right().min(area.right()), r.bottom()));
         let tp = p.with_clip_rect(Rect::from_min_max(pos2(tl_x0, area.top()), area.max));
+        let chrome_tp = p.with_clip_rect(Rect::from_min_max(pos2(tl_x0, chrome.top()), area.max));
         for (lane, r) in &rows {
             p.rect_filled(*r, 0.0, if *lane < 2 { BG_WELL } else { C::from_rgb(28, 29, 33) });
             p.line_segment([r.left_bottom(), r.right_bottom()], Stroke::new(1.0_f32, LINE));
@@ -1192,7 +1206,8 @@ impl App {
             let big = (bar_1 - 1).rem_euclid(4) == 0;
             let tick_h = if big { 14.0 } else { 7.0 };
             let tick_top = ruler.bottom() - tick_h;
-            tp.line_segment(
+            // Ruler lives above `area.top()` — lane clip `tp` was discarding ticks/labels (round 8).
+            chrome_tp.line_segment(
                 [pos2(x, tick_top), pos2(x, ruler.bottom())],
                 Stroke::new(
                     1.0_f32,
@@ -1205,14 +1220,14 @@ impl App {
             );
             if big {
                 let beat = bar as f64 * 4.0;
-                tp.text(
+                chrome_tp.text(
                     pos2(x + 4.0, ruler.top() + 2.0),
                     Align2::LEFT_TOP,
                     format!("{bar_1}"),
                     FontId::proportional(11.0),
                     C::from_rgba_unmultiplied(255, 255, 255, 199),
                 );
-                tp.text(
+                chrome_tp.text(
                     pos2(x + 4.0, ruler.top() + 13.0),
                     Align2::LEFT_TOP,
                     fmt_t(self.sec(beat)),
@@ -1963,8 +1978,8 @@ impl App {
             tp.line_segment([pos2(x, rows[0].1.top()), pos2(x, rows[3].1.bottom())], Stroke::new(1.5_f32, C::from_rgb(255, 225, 0))); } }
         let phx = bx(beat_now);
         if phx >= tl_x0 && phx <= area.right() {
-            tp.line_segment([pos2(phx, ruler.top() + 12.0), pos2(phx, y)], Stroke::new(1.5_f32, C::WHITE));
-            tp.add(egui::Shape::convex_polygon(vec![pos2(phx - 6.0, ruler.top() + 6.0), pos2(phx + 6.0, ruler.top() + 6.0), pos2(phx + 6.0, ruler.top() + 16.0), pos2(phx, ruler.top() + 22.0), pos2(phx - 6.0, ruler.top() + 16.0)], C::from_rgb(220, 220, 224), Stroke::NONE));
+            chrome_tp.line_segment([pos2(phx, ruler.top() + 12.0), pos2(phx, y)], Stroke::new(1.5_f32, C::WHITE));
+            chrome_tp.add(egui::Shape::convex_polygon(vec![pos2(phx - 6.0, ruler.top() + 6.0), pos2(phx + 6.0, ruler.top() + 6.0), pos2(phx + 6.0, ruler.top() + 16.0), pos2(phx, ruler.top() + 22.0), pos2(phx - 6.0, ruler.top() + 16.0)], C::from_rgb(220, 220, 224), Stroke::NONE));
         }
         if self.out._stream.is_none() { p.text(pos2(tl_x0 + 8.0, y + 12.0), Align2::LEFT_TOP, &self.out.info, FontId::proportional(11.0), C::from_rgb(230, 120, 80)); }
         if self.mix.tracks.is_empty() {
@@ -2586,6 +2601,27 @@ mod section_ui_tests {
         ctx.run(egui::RawInput {screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(width,800.0))),events,..Default::default()},|ctx| {
             egui::CentralPanel::default().show(ctx,|ui|app.timeline(ui));
         })
+    }
+    #[test]
+    fn timeline_chrome_toolbar_and_ruler_labels_are_painted() {
+        let (mut a, ctx, _rx, dir) = setup();
+        a.snapping = Snapping::Full;
+        let out = frame(&mut a, &ctx, vec![], 1000.0);
+        let has = |needle: &str| {
+            out.shapes.iter().any(|s| {
+                matches!(&s.shape, egui::epaint::Shape::Text(t) if t.galley.text() == needle)
+            })
+        };
+        let has_prefix = |needle: &str| {
+            out.shapes.iter().any(|s| {
+                matches!(&s.shape, egui::epaint::Shape::Text(t) if t.galley.text().contains(needle))
+            })
+        };
+        assert!(has("Move"), "toolbar Move missing");
+        assert!(has_prefix("Snap:"), "toolbar Snap missing");
+        assert!(has("1"), "ruler bar 1 missing");
+        drop(a);
+        std::fs::remove_dir_all(dir).ok();
     }
     #[test]
     fn beatgrid_surfaces_provisional_source_analysis() {

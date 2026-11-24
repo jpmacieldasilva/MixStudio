@@ -36,6 +36,17 @@ PY
 }
 
 shot track 1440 900 mixstudio-fase2-arrangement-1440.png
+python3 - <<'PY'
+from PIL import Image
+store="/cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/media"
+src=f"{store}/mixstudio-fase2-arrangement-1440.png"
+im=Image.open(src)
+# Central panel top ≈ shell toolbar 52px; timeline column from HEAD_W 132px; chrome 76px tall
+crop=im.crop((132, 52, 1320, 140))
+out=f"{store}/mixstudio-timeline-top-crop.png"
+crop.save(out)
+print(f"timeline top crop {out} {crop.size}")
+PY
 shot transition 1440 900 mixstudio-fase2-transition-editor-1440.png
 shot library 1440 900 mixstudio-fase2-library-1440.png
 shot autoorder 1440 900 mixstudio-fase2-playlist-autoorder-1440.png
