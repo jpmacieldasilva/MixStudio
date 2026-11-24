@@ -100,14 +100,15 @@ impl App {
     fn choose_library_folder(&mut self,folder:Option<String>) {
         self.library_ui.folder=folder;self.lib_node=None;self.lib_sel.clear();self.lib_anchor=None;self.lib_view_key=None;
     }
-    fn library_sidebar(&mut self,ui:&mut egui::Ui) {
+    pub(super) fn library_sidebar(&mut self,ui:&mut egui::Ui) {
         ui.spacing_mut().item_spacing.y=2.0;
+        ui.label(egui::RichText::new("SOURCES").size(10.5).color(DIM).strong());
         ui.horizontal(|ui|{
-            ui.label(egui::RichText::new("FOLDERS").size(10.5).color(DIM).strong());
+            ui.label(egui::RichText::new("").size(10.5));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{if ui.small_button("+ Add").on_hover_text("Add a music folder").clicked(){self.pick_folder();}});
         });
-        ui.add_space(4.0);
-        if nav_row(ui,"All music",self.lib.index.entries.len(),self.lib_node.is_none()&&self.library_ui.folder.is_none()).clicked(){self.choose_library_folder(None);}
+        ui.add_space(2.0);
+        if nav_row(ui,"All Music",self.lib.index.entries.len(),self.lib_node.is_none()&&self.library_ui.folder.is_none()).clicked(){self.choose_library_folder(None);}
         let key=(self.lib.path_gen,self.lib.cfg.folders.clone());
         if self.library_ui.tree_key.as_ref()!=Some(&key){self.library_ui.tree=crate::library::browse::folder_tree(&self.lib.cfg.folders,&self.lib.index.entries);self.library_ui.tree_key=Some(key);}
         let mut selected=None;let mut remove=None;
@@ -115,8 +116,8 @@ impl App {
         if let Some(folder)=selected{self.choose_library_folder(Some(folder));}
         if let Some(folder)=remove{self.lib.remove_folder(&folder);self.choose_library_folder(None);}
         ui.add_space(8.0);ui.separator();ui.spacing_mut().item_spacing.y=6.0;
-        egui::CollapsingHeader::new("DJ software imports").id_salt("library_import_settings").show(ui,|ui|self.lib_import_settings(ui));
-        egui::CollapsingHeader::new("Manage sources").id_salt("library_sources").show(ui,|ui|{
+        egui::CollapsingHeader::new("DJ Software").id_salt("library_import_settings").default_open(true).show(ui,|ui|self.lib_import_settings(ui));
+        egui::CollapsingHeader::new("Sources").id_salt("library_sources").default_open(true).show(ui,|ui|{
             if ui.add_enabled(!self.lib.cfg.folders.is_empty(),egui::Button::new("Rescan folders")).clicked(){self.lib.rescan();}
             ui.add(egui::TextEdit::singleline(&mut self.lib_path).hint_text("Paste a music folder path").desired_width(ui.available_width()));
             if ui.add_enabled(!self.lib_path.trim().is_empty(),egui::Button::new("Add path")).clicked(){let path=PathBuf::from(self.lib_path.trim());self.lib_path.clear();self.add_lib_folders(vec![path]);}
@@ -140,6 +141,10 @@ impl App {
         }
     }
     pub(super) fn library_tab(&mut self,ui:&mut egui::Ui) {
+        if self.top == 2 {
+            self.library_files(ui);
+            return;
+        }
         // The folder list is its own card; a gutter and a solid scrollbar keep it from running into the files.
         egui::SidePanel::left("library_navigation_v3").resizable(true).default_width(260.0).width_range(170.0..=400.0)
             .frame(egui::Frame::none().fill(PANEL).rounding(Rounding::same(8.0)).inner_margin(egui::Margin::same(8.0)).stroke(Stroke::new(1.0_f32, LINE_SOFT)).outer_margin(egui::Margin{left:0.0,right:6.0,top:0.0,bottom:0.0}))
@@ -152,7 +157,7 @@ impl App {
         let mut append=false;
         ui.add_space(2.0);
         ui.horizontal(|ui|{
-            let n=self.lib_sel.len();let label=if n>1 {format!("Add {n} to mix")} else {"Add to mix".into()};
+            let n=self.lib_sel.len();let label=if n>1 {format!("Add {n} to Mix")} else {"Add to Mix".into()};
             let add=egui::Button::new(egui::RichText::new(label).color(if n>0{C::BLACK}else{DIM})).fill(if n>0{ACCENT}else{PANEL}).min_size(vec2(110.0,26.0));
             let width=(ui.available_width()-128.0).max(140.0);
             egui::Frame::none().fill(BG).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32,LINE)).inner_margin(egui::Margin::symmetric(8.0,3.0)).show(ui,|ui|{
@@ -168,8 +173,10 @@ impl App {
         });
         ui.add_space(4.0);
         ui.horizontal_wrapped(|ui|{
-            toggle_button(ui,&mut self.lib_key,"Compatible key").on_hover_text("Show keys that mix harmonically with the selected mix track");
-            toggle_button(ui,&mut self.lib_bpm,"BPM range").on_hover_text("Show tracks within this tempo range of the selected mix track");
+            let ref_key = self.lib_ref().map(|(_, k, _)| k.clone()).unwrap_or_else(|| "—".into());
+            toggle_button(ui,&mut self.lib_key,&format!("Compatible with {ref_key}")).on_hover_text("Show harmonically compatible keys");
+            toggle_button(ui,&mut self.lib_bpm,"BPM ±6%").on_hover_text("Show tracks within tempo range of the selected mix track");
+            if !self.lib_bpm { self.lib_pct = 6.0; }
             ui.add_enabled(self.lib_bpm,egui::DragValue::new(&mut self.lib_pct).range(1.0..=30.0).speed(0.2).prefix("±").suffix(" %"));
             ui.add_space(8.0);
             ui.label(egui::RichText::new("Sort").color(DIM));
@@ -179,7 +186,6 @@ impl App {
         });
         if self.lib_key||self.lib_bpm {ui.label(egui::RichText::new(self.lib_ref().map(|(t,k,b)|format!("Matching {t} · {k} · {b:.1} BPM")).unwrap_or_else(||"Select a mix track to filter by its key and tempo".into())).size(11.0).color(DIM));}
         self.refresh_library_view();
-        if self.listen.is_some() { ui.add_space(2.0); self.listen_ui(ui); ui.add_space(2.0); }
         ui.horizontal(|ui|{
             ui.label(egui::RichText::new(if self.lib_sel.is_empty() {format!("{} files",self.lib_view.len())} else {format!("{} files · {} selected",self.lib_view.len(),self.lib_sel.len())}).color(DIM).size(11.5));
             if self.lib.scanning{ui.spinner();ui.label(egui::RichText::new("Scanning folders…").size(11.5).color(DIM));}
@@ -188,14 +194,19 @@ impl App {
         });
         ui.add_space(2.0);
         if self.lib_view.is_empty(){ui.add_space(24.0);ui.vertical_centered(|ui|ui.label(egui::RichText::new(if self.lib.cfg.folders.is_empty()&&self.lib_node.is_none(){"Add a music folder to start your library."}else{"No files match. Clear the search or filters, or choose another folder."}).color(DIM)));}
-        let mut columns=vec![(SortCol::Filename,"Track"),(SortCol::Bpm,"BPM"),(SortCol::Key,"Key"),(SortCol::Duration,"Length")];
-        if self.library_ui.details {columns.extend([(SortCol::Folder,"Folder"),(SortCol::Genre,"Genre")]);}
+        let mut columns=vec![(SortCol::Title,"Title"),(SortCol::Artist,"Artist"),(SortCol::Bpm,"BPM"),(SortCol::Key,"Key"),(SortCol::Duration,"Length")];
+        columns.push((SortCol::Filename,"Status"));
         let roots=self.lib.cfg.folders.clone();
         let available=ui.available_height();let mods=ui.input(|i|i.modifiers);
-        let mut table=egui_extras::TableBuilder::new(ui).id_salt("library_files_v3").striped(true).resizable(true).sense(Sense::click_and_drag()).max_scroll_height(available).min_scrolled_height(0.0)
+        let mut table=egui_extras::TableBuilder::new(ui).id_salt("library_files_v3").striped(true).resizable(true).sense(Sense::click_and_drag()).max_scroll_height(available - 44.0).min_scrolled_height(0.0)
             .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(egui_extras::Column::exact(34.0)).column(egui_extras::Column::remainder().at_least(220.0)).column(egui_extras::Column::initial(70.0).at_least(50.0)).column(egui_extras::Column::initial(58.0).at_least(44.0)).column(egui_extras::Column::initial(66.0).at_least(50.0));
-        if self.library_ui.details{table=table.column(egui_extras::Column::initial(170.0).at_least(60.0)).column(egui_extras::Column::initial(100.0).at_least(50.0));}
+            .column(egui_extras::Column::exact(34.0))
+            .column(egui_extras::Column::remainder().at_least(140.0))
+            .column(egui_extras::Column::initial(120.0).at_least(72.0))
+            .column(egui_extras::Column::initial(56.0).at_least(44.0))
+            .column(egui_extras::Column::initial(52.0).at_least(40.0))
+            .column(egui_extras::Column::initial(58.0).at_least(48.0))
+            .column(egui_extras::Column::initial(72.0).at_least(56.0));
         let mut sorted=None;let mut click=None;let mut double=None;let mut drag=None;let mut listen=None;
         table.header(26.0,|mut header|{header.col(|_|{});for (col,name) in &columns {header.col(|ui|{
             let on=self.lib_sort==*col; let arrow=if on {if self.lib_asc {" ⏶"} else {" ⏷"}} else {""};
@@ -210,18 +221,15 @@ impl App {
                     let button=egui::Button::new(egui::RichText::new(if on {"⏹"} else {"▶"}).size(12.0).color(if on {BG} else {TXT})).fill(if on {ACCENT} else {C::from_rgb(52,54,60)}).rounding(Rounding::same(12.0)).min_size(vec2(24.0,24.0));
                     if ui.add_enabled(!unavailable,button).on_hover_text(if on {"Stop preview"} else {"Preview from the first drop at original tempo"}).clicked(){listen=Some((e.path.clone(),e.filename().to_string()));}
                 });
-                row.col(|ui|{ui.add_space(4.0);ui.vertical(|ui|{ui.spacing_mut().item_spacing.y=2.0;
-                    ui.add(egui::Label::new(egui::RichText::new(e.filename()).strong().size(13.5).color(color)).truncate());
-                    let metadata=if e.artist.is_empty(){e.title.clone()}else if e.title.is_empty(){e.artist.clone()}else{format!("{} · {}",e.artist,e.title)};
-                    ui.add(egui::Label::new(egui::RichText::new(metadata).size(11.5).color(DIM)).truncate());
-                });});
-                row.col(|ui|{ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.add_space(8.0);ui.label(egui::RichText::new(e.bpm.map(|b|format!("{b:.1}")).unwrap_or_else(||"—".into())).size(13.0).color(if e.bpm.is_some() {color} else {DIM}));});});
+                let title = if e.title.is_empty() { e.filename().to_string() } else { e.title.clone() };
+                row.col(|ui|{ui.add(egui::Label::new(egui::RichText::new(title).strong().size(13.0).color(color)).truncate());});
+                row.col(|ui|{ui.add(egui::Label::new(egui::RichText::new(if e.artist.is_empty() { "—" } else { &e.artist }).size(12.0).color(DIM)).truncate());});
+                row.col(|ui|{ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.add_space(8.0);ui.label(egui::RichText::new(e.bpm.map(|b|format!("{b:.1}")).unwrap_or_else(||"—".into())).size(12.5).color(if e.bpm.is_some() {color} else {DIM}));});});
                 row.col(|ui|{match &e.key {Some(key)=>chip(ui,key.clone(),if unavailable {DIM} else {key_col(key)}),None=>{ui.label(egui::RichText::new("—").color(DIM));}}});
-                row.col(|ui|{ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.add_space(8.0);ui.label(egui::RichText::new(fmt_t(e.duration)).size(12.5).color(color));});});
-                if self.library_ui.details{
-                    let folder=relative_folder(&e.path,&roots);
-                    for text in [folder,e.genre.clone()]{row.col(|ui|{ui.add(egui::Label::new(egui::RichText::new(text).size(11.5).color(DIM)).truncate());});}
-                }
+                row.col(|ui|{ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui|{ui.add_space(8.0);ui.label(egui::RichText::new(fmt_t(e.duration)).size(12.0).color(color));});});
+                let in_mix = self.mix.tracks.iter().any(|t| t.path == e.path);
+                let status = if in_mix { "In mix" } else if e.bpm.is_some() && e.key.is_some() { "Ready" } else if unavailable { "Missing" } else { "Indexed" };
+                row.col(|ui|{ui.label(egui::RichText::new(status).size(11.5).color(if in_mix { ACCENT } else { DIM }));});
                 let response=row.response().on_hover_ui(|ui|{ui.set_max_width(480.0);ui.strong(e.filename());ui.label(format!("{} · {}",e.artist,e.title));ui.label(egui::RichText::new(&e.path).size(11.0).color(DIM));
                     if let Some((source,track))=self.lib.ext_info(&e.path){ui.label(format!("{} tags: {} BPM · {}",source.name(),track.bpm.map(|b|format!("{b:.2}")).unwrap_or_else(||"unknown".into()),track.key.as_deref().unwrap_or("unknown")));}
                     if let Some(error)=&e.error{ui.colored_label(C::LIGHT_RED,error);}else if unavailable{ui.colored_label(C::YELLOW,"Source drive is unavailable");}
@@ -234,6 +242,11 @@ impl App {
         if let Some(paths)=drag{self.lib_sel=paths.into_iter().collect();}
         if let Some((k,mods))=click{self.select_library_row(k,mods);}
         if let Some(path)=double{self.lib_add(vec![path]);}else if append{self.lib_add(self.library_selected_paths());}
+        ui.add_space(4.0);
+        egui::Frame::none().fill(ROW).inner_margin(egui::Margin::symmetric(10.0,6.0)).rounding(6.0).show(ui,|ui|{
+            if self.listen.is_some() { self.listen_ui(ui); }
+            else { ui.horizontal(|ui|{ui.label(egui::RichText::new("▶ Preview — select a row and press play").size(11.5).color(DIM));}); }
+        });
     }
     /// Enter adds the selection; Ctrl+A selects every visible file.
     pub(super) fn library_keys(&mut self,ctx:&egui::Context) {

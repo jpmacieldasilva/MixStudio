@@ -73,10 +73,11 @@ impl App {
             }
         });
         ui.horizontal(|ui| {
-            toggle_button(ui, &mut self.lib_key, "Harmonic");
-            toggle_button(ui, &mut self.lib_bpm, "BPM");
-            if self.lib_bpm {
-                ui.add(egui::DragValue::new(&mut self.lib_pct).range(1.0..=30.0).speed(0.2).prefix("±").suffix("%"));
+            let ref_key = self.lib_ref().map(|(_, k, _)| k.clone()).unwrap_or_else(|| "8B".into());
+            toggle_button(ui, &mut self.lib_key, &format!("Compatible with {ref_key}"));
+            toggle_button(ui, &mut self.lib_bpm, "BPM ±6%");
+            if self.lib_bpm && self.lib_pct < 5.9 {
+                self.lib_pct = 6.0;
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("+ Folder").clicked() {
@@ -114,7 +115,7 @@ impl App {
                             (
                                 idx,
                                 e.path.clone(),
-                                e.filename().to_string(),
+                                if e.title.is_empty() { e.filename().to_string() } else { e.title.clone() },
                                 e.artist.clone(),
                                 e.bpm,
                                 e.key.clone(),
@@ -170,14 +171,24 @@ impl App {
                 DIM,
             );
         }
-        let bpm_lbl = bpm.map(|b| format!("{b:.0}")).unwrap_or_else(|| "—".into());
-        p.text(
-            pos2(rect.right() - 8.0, rect.center().y),
-            Align2::RIGHT_CENTER,
-            bpm_lbl,
-            FontId::proportional(11.0),
-            MUTED,
-        );
+        let dur = self
+            .library_entries()
+            .iter()
+            .find(|e| e.path == path)
+            .map(|e| fmt_t(e.duration))
+            .unwrap_or_else(|| "—".into());
+        let right = if in_mix {
+            "In mix".to_string()
+        } else {
+            format!("{:.0}", bpm.unwrap_or(0.0))
+        };
+        let sub = if in_mix {
+            bpm.map(|b| format!("{b:.0}")).unwrap_or_else(|| "—".into())
+        } else {
+            dur
+        };
+        p.text(pos2(rect.right() - 8.0, rect.center().y - 5.0), Align2::RIGHT_CENTER, &right, FontId::proportional(11.0), if in_mix { ACCENT } else { TXT });
+        p.text(pos2(rect.right() - 8.0, rect.center().y + 6.0), Align2::RIGHT_CENTER, &sub, FontId::proportional(9.5), MUTED);
         if response.hovered() || preview {
             let play_r = Rect::from_center_size(pos2(rect.right() - 28.0, rect.center().y), vec2(22.0, 22.0));
             let add_r = Rect::from_center_size(pos2(rect.right() - 52.0, rect.center().y), vec2(22.0, 22.0));
@@ -277,9 +288,9 @@ impl App {
             .stroke(Stroke::new(1.0_f32, LINE_SOFT))
             .show(ui, |ui| {
                 let n = self.lib_view.len();
-                let compatible = if self.lib_key { self.lib_view.len() } else { n };
+                let total = self.library_entries().len();
                 ui.label(
-                    egui::RichText::new(format!("{n} shown · {compatible} for mix"))
+                    egui::RichText::new(format!("{n} tracks · {total} indexed"))
                         .size(11.0)
                         .color(DIM),
                 );

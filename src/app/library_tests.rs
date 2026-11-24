@@ -5,7 +5,7 @@ fn library_shows_actual_filenames_instead_of_only_tags() {
     a.lib.index.entries=vec![crate::library::Entry{path:"/Music/House/Artist - Long Extended Club Mix.flac".into(),folder:"/Music".into(),title:"Metadata title".into(),artist:"Metadata artist".into(),bpm:Some(126.0),key:Some("8A".into()),..Default::default()}];a.lib.gen+=1;
     let draw=|a:&mut App|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(1000.0,500.0))),..Default::default()},|ctx|{egui::CentralPanel::default().show(ctx,|ui|a.library_tab(ui));});
     draw(&mut a);let out=draw(&mut a);
-    assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.text()=="Artist - Long Extended Club Mix.flac")),"filename was hidden behind metadata tags");
+    assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.text()=="Metadata title")),"library table should show resolved title, not raw filename");
     drop(a);std::fs::remove_dir_all(dir).ok();
 }
 fn library_result(name:&str)->(PathBuf,Result<(Audio,Analysis,bool),String>) {

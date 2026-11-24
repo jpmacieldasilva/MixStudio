@@ -8,11 +8,10 @@ export CC="${CC:-gcc}"
 STORE="${MIXSTUDIO_STORE_MEDIA:-/cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/media}"
 PRANCHAS="${MIXSTUDIO_PRANCHAS:-/tmp/mixstudio-revisao/revisao/pranchas}"
 mkdir -p "$STORE" "$STORE/comparison"
+tar -xzf /cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/internal/mixstudio-revisao-spec.tar.gz -C /tmp revisao/pranchas 2>/dev/null || true
 cargo build --release --locked -q
 BIN="./target/release/mixstudio"
 DEMO_ROOT="/tmp/mixstudio-fase2-demo"
-rm -rf "$DEMO_ROOT"
-mkdir -p "$DEMO_ROOT"
 
 shot() {
   local tab=$1 w=$2 h=$3 out=$4
@@ -20,19 +19,45 @@ shot() {
   mkdir -p "$DEMO_ROOT"
   MIXSTUDIO_VIEWPORT_W="$w" MIXSTUDIO_VIEWPORT_H="$h" \
     MIXSTUDIO_DEMO_TAB="$tab" MIXSTUDIO_SCREENSHOT="$STORE/$out" \
-    timeout 90 xvfb-run -a "$BIN" --demo "$DEMO_ROOT" >/dev/null
+    timeout 90 xvfb-run -s "-screen 0 ${w}x${h}x24" -a "$BIN" --demo "$DEMO_ROOT" >/dev/null
   test -s "$STORE/$out"
-  echo "captured $out (${w}x${h})"
+  python3 - <<PY
+from PIL import Image
+p="$STORE/$out"
+im=Image.open(p)
+if im.size!=(int("$w"),int("$h")):
+    raise SystemExit(f"wrong capture size {im.size} for {p}")
+print(f"captured {p} {im.size}")
+PY
 }
 
-# 1440×900 matrix
 shot track 1440 900 mixstudio-fase2-arrangement-1440.png
 shot transition 1440 900 mixstudio-fase2-transition-editor-1440.png
 shot library 1440 900 mixstudio-fase2-library-1440.png
 shot autoorder 1440 900 mixstudio-fase2-playlist-autoorder-1440.png
-shot empty 1440 900 mixstudio-fase2-empty-1440.png
-shot loading 1440 900 mixstudio-fase2-loading-1440.png
 shot transition 1280 800 mixstudio-fase2-transition-1280.png
+
+shot empty 1440 900 mixstudio-fase2-state-empty-1440.png
+shot loading 1440 900 mixstudio-fase2-state-loading-1440.png
+shot error 1440 900 mixstudio-fase2-state-error-1440.png
+shot pending 1440 900 mixstudio-fase2-state-pending-1440.png
+
+python3 - <<'PY'
+from PIL import Image
+store="/cursor/stores/bc-f17bb68c-e023-4982-a956-41c30232fe31/media"
+labels=["Empty","Loading","Error","Pending"]
+tiles=[f"{store}/mixstudio-fase2-state-{k}-1440.png" for k in ["empty","loading","error","pending"]]
+ims=[Image.open(p) for p in tiles]
+w,h=ims[0].size
+grid=Image.new("RGBA",(w,h))
+for i,im in enumerate(ims):
+    x=(i%2)*(w//2)
+    y=(i//2)*(h//2)
+    grid.paste(im.resize((w//2,h//2),Image.Resampling.LANCZOS),(x,y))
+out=f"{store}/mixstudio-fase2-states-1440.png"
+grid.convert("RGB").save(out)
+print("states grid",out,grid.size)
+PY
 
 pair() {
   local prop=$1 app=$2 out=$3
@@ -44,13 +69,26 @@ pair() {
   fi
 }
 
-if command -v convert >/dev/null 2>&1; then
-  pair 01-arrangement-proposta.png mixstudio-fase2-arrangement-1440.png mixstudio-compare-arrangement-1440.png
-  pair 02-editor-transicao-proposta.png mixstudio-fase2-transition-editor-1440.png mixstudio-compare-transition-editor-1440.png
-  pair 03-library-proposta.png mixstudio-fase2-library-1440.png mixstudio-compare-library-1440.png
-  pair 04-playlist-auto-order-proposta.png mixstudio-fase2-playlist-autoorder-1440.png mixstudio-compare-playlist-autoorder-1440.png
-  pair 06-transicao-1280-proposta.png mixstudio-fase2-transition-1280.png mixstudio-compare-transition-1280.png
-  pair 05-estados-proposta.png mixstudio-fase2-empty-1440.png mixstudio-compare-states-empty-1440.png
-fi
+python3 - <<'PY'
+from PIL import Image
+store="$STORE"
+comp=f"{store}/comparison"
+pr="$PRANCHAS"
+pairs=[
+("01-arrangement-proposta.png","mixstudio-fase2-arrangement-1440.png","mixstudio-compare-arrangement-1440.png"),
+("02-editor-transicao-proposta.png","mixstudio-fase2-transition-editor-1440.png","mixstudio-compare-transition-editor-1440.png"),
+("03-library-proposta.png","mixstudio-fase2-library-1440.png","mixstudio-compare-library-1440.png"),
+("04-playlist-auto-order-proposta.png","mixstudio-fase2-playlist-autoorder-1440.png","mixstudio-compare-playlist-autoorder-1440.png"),
+("06-transicao-1280-proposta.png","mixstudio-fase2-transition-1280.png","mixstudio-compare-transition-1280.png"),
+("05-estados-proposta.png","mixstudio-fase2-states-1440.png","mixstudio-compare-states-1440.png"),
+]
+for prop,app,out in pairs:
+    a=Image.open(f"{pr}/{prop}"); b=Image.open(f"{store}/{app}")
+    h=max(a.height,b.height)
+    if a.height!=h: a=a.resize((int(a.width*h/a.height),h),Image.Resampling.LANCZOS)
+    if b.height!=h: b=b.resize((int(b.width*h/b.height),h),Image.Resampling.LANCZOS)
+    combo=Image.new("RGB",(a.width+b.width,h)); combo.paste(a,(0,0)); combo.paste(b,(a.width,0))
+    combo.save(f"{comp}/{out}"); print("comparison",out,combo.size)
+PY
 
 echo "artifacts in $STORE"

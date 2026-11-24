@@ -58,11 +58,11 @@ impl App {
     if self.fx_sel.is_some() {
       return Some(Tab::Effects);
     }
-    if self.sel_in.is_some() {
-      return Some(Tab::Transition);
-    }
     if self.sel.is_some() {
       return Some(Tab::Track);
+    }
+    if self.sel_in.is_some() {
+      return Some(Tab::Transition);
     }
     None
   }
@@ -92,6 +92,10 @@ impl App {
         egui::TopBottomPanel::bottom("inspector")
           .resizable(false)
           .exact_height(272.0)
+      } else if self.tab == Tab::Track {
+        egui::TopBottomPanel::bottom("inspector")
+          .resizable(false)
+          .exact_height(220.0)
       } else if self.tab == Tab::Compare {
         egui::TopBottomPanel::bottom("inspector")
           .resizable(false)
@@ -114,11 +118,6 @@ impl App {
     if self.master_popover {
       self.shell_master_popover(ctx);
     }
-    egui::SidePanel::right("master_meter")
-      .exact_width(44.0)
-      .resizable(false)
-      .frame(egui::Frame::none().fill(PANEL).stroke(Stroke::new(1.0_f32, LINE_SOFT)))
-      .show(ctx, |ui| self.master_meter(ui));
     if view == ShellView::Library && self.tab == Tab::Library {
       egui::CentralPanel::default()
         .frame(egui::Frame::none().fill(BG).inner_margin(Margin::symmetric(12.0, 8.0)))
@@ -137,9 +136,7 @@ impl App {
     if !self.sidebar_open {
       return;
     }
-  if self.shell_view() == ShellView::Library && self.tab == Tab::Library {
-      return;
-    }
+    let lib_full = self.shell_view() == ShellView::Library && self.tab == Tab::Library;
     egui::SidePanel::left("setlab_sidebar")
       .exact_width(SIDEBAR_W)
       .resizable(false)
@@ -151,8 +148,20 @@ impl App {
       )
       .show(ctx, |ui| {
         ui.add_space(4.0);
-        self.studio_sidebar_body(ui);
-        if self.shell_view() == ShellView::Arrange {
+        if lib_full {
+          if ui.add(egui::Button::new(egui::RichText::new("← Arrangement").size(12.0))).clicked() {
+            self.top = 3;
+            self.tab = Tab::Playlist;
+          }
+          ui.add_space(6.0);
+          egui::ScrollArea::vertical()
+            .id_salt("lib_sources_sidebar")
+            .auto_shrink([false; 2])
+            .show(ui, |ui| self.library_sidebar(ui));
+        } else {
+          self.studio_sidebar_body(ui);
+        }
+        if self.shell_view() == ShellView::Arrange || lib_full {
           ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             self.shell_sidebar_status(ui);
           });
@@ -256,6 +265,15 @@ impl App {
                   self.persistence.relink_window = true;
                   ui.close_menu();
                 }
+                ui.separator();
+                if ui.button("Settings…").clicked() {
+                  self.settings_open = true;
+                  ui.close_menu();
+                }
+                if ui.button("Keyboard Shortcuts…").clicked() {
+                  self.shortcuts_help = true;
+                  ui.close_menu();
+                }
               },
             );
             ui.label(
@@ -294,17 +312,11 @@ impl App {
               });
             });
           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.small_button("Help").on_hover_text("Keyboard shortcuts (Cmd+/)").clicked() {
-              self.shortcuts_help = true;
-            }
-            if ui.small_button("Settings").on_hover_text("Stems and transition colours").clicked() {
-              self.settings_open = true;
-            }
             if ui
               .add(
-                egui::Button::new(egui::RichText::new("Export").size(13.0))
-                  .fill(FOCUS)
-                  .stroke(Stroke::NONE)
+                egui::Button::new(egui::RichText::new("Export").size(13.0).color(TXT))
+                  .fill(CTRL_FILL)
+                  .stroke(Stroke::new(1.0_f32, LINE_SOFT))
                   .min_size(vec2(78.0, 28.0)),
               )
               .on_hover_text("Export mix")
@@ -426,21 +438,21 @@ impl App {
   }
 
   fn shell_transport_bar(&mut self, ctx: &egui::Context) {
-    if self.shell_view() != ShellView::Arrange {
-      return;
-    }
     egui::TopBottomPanel::bottom("transport_bar")
       .exact_height(56.0)
       .frame(
         egui::Frame::none()
           .fill(PANEL)
-          .inner_margin(Margin::symmetric(12.0, 8.0))
+          .inner_margin(Margin::symmetric(12.0, 6.0))
           .stroke(Stroke::new(1.0_f32, LINE_SOFT)),
       )
       .show(ctx, |ui| {
+        let empty = self.mix.tracks.is_empty();
         let b = self.beat();
         let bpm = self.mix.bpm;
-        let bar = (b / 4.0).floor() as i64 + 1;
+        let bar_n = (b / 4.0).floor() + 1.0;
+        let bar_frac = (b % 4.0) + 1.0;
+        let total = self.mix.length_beats();
         ui.horizontal(|ui| {
           ui.horizontal(|ui| {
             let prev = ghost_icon_button(ui, "⏮", "Previous track · double-click Return to start");
@@ -480,67 +492,113 @@ impl App {
                 self.seek(s);
               }
             }
-          });
-          ui.add_space(10.0);
-          let now = self
-            .sel
-            .and_then(|i| self.mix.tracks.get(i))
-            .map(|t| t.title.as_str())
-            .unwrap_or("—");
-          ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            ui.label(
-              egui::RichText::new(format!("{} · bar {bar} · {bpm:.1} BPM", fmt_t(self.sec(b))))
-                .size(13.5)
-                .color(TXT)
-                .strong(),
-            );
-            ui.label(
-              egui::RichText::new(now)
-                .size(11.0)
-                .color(if self.playing() { ACCENT } else { MUTED }),
-            );
-          });
-          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
-            let lb = egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { ACCENT } else { DIM }))
-              .fill(if self.loop_on { FOCUS_SOFT } else { C::TRANSPARENT })
-              .stroke(if self.loop_on {
-                Stroke::new(1.0_f32, FOCUS)
-              } else {
-                Stroke::NONE
-              })
-              .min_size(vec2(46.0, 26.0));
-            if ui.add(lb).on_hover_text("Loop selection or bar length").clicked() {
+            ui.add_space(6.0);
+            if ui
+              .add(
+                egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { ACCENT } else { DIM }))
+                  .fill(if self.loop_on { FOCUS_SOFT } else { C::TRANSPARENT })
+                  .min_size(vec2(40.0, 26.0)),
+              )
+              .clicked()
+            {
               self.stop_comparison();
               self.stop_transition_audition();
               self.loop_on = !self.loop_on;
               let s = (b / 4.0).floor() * 4.0;
               self.set_loop(if self.loop_on {
-                Some(self.section_range.map(|(_, a, b)| (a, b)).unwrap_or((s, s + self.bars as f64 * 4.0)))
+                Some(self.section_range.map(|(_, a, b2)| (a, b2)).unwrap_or((s, s + self.bars as f64 * 4.0)))
               } else {
                 None
               });
             }
             egui::ComboBox::from_id_salt("overlap_bars")
-              .width(64.0)
+              .width(72.0)
               .selected_text(format!("{} bars", self.bars / 4))
               .show_ui(ui, |ui| {
                 for bars in [4u32, 8, 16, 32] {
                   ui.selectable_value(&mut self.bars, bars, format!("{} bars", bars / 4));
                 }
+              });
+          });
+          ui.add_space(12.0);
+          ui.horizontal(|ui| {
+            let now_s = fmt_t(self.sec(b));
+            let end_s = fmt_t(self.sec(total));
+            ui.label(
+              egui::RichText::new(if empty {
+                "0:00 / 0:00".into()
+              } else {
+                format!("{now_s} / {end_s}")
               })
-              .response
-              .on_hover_text("Default transition overlap");
+              .size(22.0)
+              .strong()
+              .color(TXT),
+            );
+            ui.add_space(16.0);
+            ui.vertical(|ui| {
+              ui.spacing_mut().item_spacing.y = 0.0;
+              ui.label(egui::RichText::new("Bar").size(10.0).color(MUTED));
+              ui.label(
+                egui::RichText::new(if empty {
+                  "1.1".into()
+                } else {
+                  format!("{:.1}", bar_n + (bar_frac - 1.0) / 4.0)
+                })
+                .size(12.0)
+                .color(TXT),
+              );
+            });
+            ui.add_space(12.0);
+            let logical = self.mix.logical_transitions();
+            let trans = logical
+              .iter()
+              .enumerate()
+              .find(|(_, (_, _, s, e))| b >= *s && b <= *e)
+              .or_else(|| logical.iter().enumerate().next());
+            ui.vertical(|ui| {
+              ui.spacing_mut().item_spacing.y = 0.0;
+              if empty {
+                ui.label(egui::RichText::new("Track").size(10.0).color(MUTED));
+                ui.label(egui::RichText::new("—").size(12.0).color(DIM));
+              } else if let Some((k, (o, i, s, e))) = trans {
+                let left = ((e - b) / 4.0).max(0.0).ceil() as i64;
+                ui.label(
+                  egui::RichText::new(format!("Transition {} · {left} bars left", k + 1))
+                    .size(10.0)
+                    .color(MUTED),
+                );
+                ui.label(
+                  egui::RichText::new(format!("{} -> {}", self.mix.tracks[*o].title, self.mix.tracks[*i].title))
+                    .size(11.5)
+                    .color(TXT),
+                );
+                let _ = s;
+              } else {
+                ui.label(egui::RichText::new("Transition").size(10.0).color(MUTED));
+                ui.label(egui::RichText::new("—").size(12.0).color(DIM));
+              }
+            });
+          });
+          ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(4.0);
+            ui.scope(|ui| {
+              ui.set_min_width(40.0);
+              self.master_meter(ui);
+            });
+            toggle_button(ui, &mut self.mix.key_lock, "Key Lock");
+            ui.label(egui::RichText::new(format!("{bpm:.1} BPM")).size(12.5).strong().color(TXT));
             let mo = self.mix.metronome;
-            let met = egui::Button::new(egui::RichText::new("Click").size(11.0).color(if mo { ON_LIVE } else { DIM }))
-              .fill(if mo { ACCENT.gamma_multiply(0.85) } else { CTRL_FILL })
-              .min_size(vec2(52.0, 26.0));
-            if ui.add(met).on_hover_text("Metronome").clicked() {
+            if ui
+              .add(
+                egui::Button::new(egui::RichText::new("Click").size(11.0).color(if mo { ON_LIVE } else { DIM }))
+                  .fill(if mo { ACCENT.gamma_multiply(0.85) } else { CTRL_FILL })
+                  .min_size(vec2(44.0, 24.0)),
+              )
+              .on_hover_text("Metronome")
+              .clicked()
+            {
               self.mix.metronome = !mo;
             }
-            toggle_button(ui, &mut self.mix.key_lock, "Key Lock")
-              .on_hover_text("Keep pitch when tempo changes");
           });
         });
       });
