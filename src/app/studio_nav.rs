@@ -187,7 +187,7 @@ impl App {
         } else {
             dur
         };
-        p.text(pos2(rect.right() - 8.0, rect.center().y - 5.0), Align2::RIGHT_CENTER, &right, FontId::proportional(11.0), if in_mix { ACCENT } else { TXT });
+        p.text(pos2(rect.right() - 8.0, rect.center().y - 5.0), Align2::RIGHT_CENTER, &right, FontId::proportional(11.0), if in_mix { FOCUS } else { TXT });
         p.text(pos2(rect.right() - 8.0, rect.center().y + 6.0), Align2::RIGHT_CENTER, &sub, FontId::proportional(9.5), MUTED);
         if response.hovered() || preview {
             let play_r = Rect::from_center_size(pos2(rect.right() - 28.0, rect.center().y), vec2(22.0, 22.0));
@@ -234,8 +234,21 @@ impl App {
 
     fn studio_mix_nav(&mut self, ui: &mut egui::Ui) {
         let order = self.mix.main_order();
+        ui.horizontal(|ui| {
+            let ref_key = self
+                .lib_ref()
+                .map(|(_, k, _)| k.clone())
+                .unwrap_or_else(|| self.mix.tracks.first().map(|t| t.key.clone()).unwrap_or_else(|| "8B".into()));
+            toggle_button(ui, &mut self.lib_key, &format!("Compatible with {ref_key}"));
+            toggle_button(ui, &mut self.lib_bpm, "BPM ±6%");
+            if self.lib_bpm && self.lib_pct < 5.9 {
+                self.lib_pct = 6.0;
+            }
+        });
+        ui.add_space(4.0);
         if order.is_empty() {
-            ui.label(egui::RichText::new("Empty mix — drag tracks from Tracks tab.").size(11.5).color(DIM));
+            ui.label(egui::RichText::new("Empty mix — drag tracks from Library tab.").size(11.5).color(DIM));
+            self.studio_playlist_footer(ui, 0);
             return;
         }
         egui::ScrollArea::vertical().id_salt("studio_mix_rows").show(ui, |ui| {
@@ -251,49 +264,65 @@ impl App {
                 }
                 let p = ui.painter();
                 if sel || response.hovered() {
-                    p.rect_filled(rect, 6.0, if playing { ACCENT.gamma_multiply(0.2) } else if sel { FOCUS_SOFT } else { CTRL_HOVER });
+                    p.rect_filled(rect, 6.0, if sel { FOCUS_SOFT } else if playing { CTRL_HOVER } else { CTRL_HOVER });
                 }
                 chip_at(p, pos2(rect.left() + 4.0, rect.center().y), &t.key, key_col(&t.key));
                 p.text(
-                    pos2(rect.left() + 50.0, rect.top() + 5.0),
+                    pos2(rect.left() + 50.0, rect.top() + 4.0),
                     Align2::LEFT_TOP,
                     &t.title,
                     FontId::proportional(12.0),
-                    if playing { ACCENT } else { TXT },
+                    TXT,
                 );
                 let artist = if t.artist.is_empty() { "Unknown artist" } else { t.artist.as_str() };
                 p.text(
-                    pos2(rect.left() + 50.0, rect.bottom() - 14.0),
-                    Align2::LEFT_BOTTOM,
+                    pos2(rect.left() + 50.0, rect.center().y + 1.0),
+                    Align2::LEFT_TOP,
                     artist,
-                    FontId::proportional(10.0),
+                    FontId::proportional(10.5),
                     DIM,
                 );
                 p.text(
-                    pos2(rect.right() - 6.0, rect.center().y - 5.0),
+                    pos2(rect.left() + 50.0, rect.bottom() - 4.0),
+                    Align2::LEFT_BOTTOM,
+                    format!("{:.0} BPM", t.bpm),
+                    FontId::proportional(10.0),
+                    MUTED,
+                );
+                p.text(
+                    pos2(rect.right() - 6.0, rect.center().y - 6.0),
                     Align2::RIGHT_CENTER,
                     "In mix",
                     FontId::proportional(11.0),
-                    ACCENT,
+                    FOCUS,
                 );
                 p.text(
                     pos2(rect.right() - 6.0, rect.center().y + 7.0),
                     Align2::RIGHT_CENTER,
-                    format!("{:.1} BPM", t.bpm),
+                    fmt_t(t.duration),
                     FontId::proportional(10.0),
                     MUTED,
                 );
                 let _ = k;
             }
         });
-        let n = order.len();
-        let total = self.lib.index.entries.len();
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(format!("{n} tracks · {total} indexed"))
-                .size(11.0)
-                .color(DIM),
-        );
+        self.studio_playlist_footer(ui, order.len());
+    }
+
+    fn studio_playlist_footer(&mut self, ui: &mut egui::Ui, n: usize) {
+        ui.add_space(6.0);
+        egui::Frame::none()
+            .fill(ROW)
+            .rounding(6.0)
+            .inner_margin(8.0)
+            .stroke(Stroke::new(1.0_f32, LINE_SOFT))
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new(format!("{n} tracks in mix"))
+                        .size(11.0)
+                        .color(DIM),
+                );
+            });
     }
 
     fn studio_nav_footer(&mut self, ui: &mut egui::Ui) {
@@ -332,6 +361,6 @@ fn chip_at(p: &egui::Painter, center: egui::Pos2, text: &str, col: C) {
     let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(11.0), col);
     let size = galley.size() + vec2(10.0, 4.0);
     let rect = Rect::from_center_size(center, size);
-    p.rect_filled(rect, 4.0, col.gamma_multiply(0.18));
+    p.rect_filled(rect, 4.0, col.gamma_multiply(0.32));
     p.galley(rect.min + vec2(5.0, 2.0), galley, col);
 }

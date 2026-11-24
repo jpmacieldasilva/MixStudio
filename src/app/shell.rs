@@ -99,6 +99,7 @@ impl App {
     self.shell_settings_window(ctx);
     self.shell_shortcuts_window(ctx);
     self.shell_frame_pin_demo();
+    self.library_import_window(ctx);
     let view = self.shell_view();
     let screen = ctx.screen_rect().height();
     if self.top != 2 {
@@ -303,16 +304,6 @@ impl App {
                   ui.close_menu();
                 }
               },
-            );
-            ui.label(
-              egui::RichText::new(format!(
-                "{} tracks · {:.1} BPM · {}",
-                self.mix.tracks.len(),
-                self.mix.bpm,
-                fmt_t(self.mix.length_beats() * 60.0 / self.mix.bpm.max(1.0))
-              ))
-              .size(11.0)
-              .color(MUTED),
             );
           });
           let mid = ui.max_rect().center().x;
@@ -523,8 +514,9 @@ impl App {
             ui.add_space(6.0);
             if ui
               .add(
-                egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { ACCENT } else { DIM }))
-                  .fill(if self.loop_on { FOCUS_SOFT } else { C::TRANSPARENT })
+                egui::Button::new(egui::RichText::new("Loop").size(11.0).color(if self.loop_on { TXT } else { DIM }))
+                  .fill(if self.loop_on { CTRL_FILL } else { C::TRANSPARENT })
+                  .stroke(Stroke::new(if self.loop_on { 1.0 } else { 0.0 }, LINE_SOFT))
                   .min_size(vec2(40.0, 26.0)),
               )
               .clicked()
@@ -613,18 +605,25 @@ impl App {
               ui.set_min_width(40.0);
               self.master_meter(ui);
             });
-            toggle_button(ui, &mut self.mix.key_lock, "Key Lock");
-            ui.label(egui::RichText::new(format!("{bpm:.1} BPM")).size(12.5).strong().color(TXT));
-            let mo = self.mix.metronome;
             if ui
               .add(
-                egui::Button::new(egui::RichText::new("Click").size(11.0).color(if mo { ON_LIVE } else { DIM }))
-                  .fill(if mo { ACCENT.gamma_multiply(0.85) } else { CTRL_FILL })
-                  .min_size(vec2(44.0, 24.0)),
+                egui::Button::new(egui::RichText::new("Key Lock").size(11.0).color(if self.mix.key_lock { TXT } else { DIM }))
+                  .fill(C::TRANSPARENT)
+                  .frame(false),
               )
-              .on_hover_text("Metronome")
+              .on_hover_text("Lock pitch when tempo changes")
               .clicked()
             {
+              self.mix.key_lock = !self.mix.key_lock;
+            }
+            ui.label(egui::RichText::new(format!("{bpm:.1} BPM")).size(12.5).strong().color(TXT));
+            let mo = self.mix.metronome;
+            let click_btn = ghost_icon_button(
+              ui,
+              if mo { "♩" } else { "♪" },
+              if mo { "Metronome on — click to disable" } else { "Metronome off — click to enable" },
+            );
+            if click_btn.clicked() {
               self.mix.metronome = !mo;
             }
           });
