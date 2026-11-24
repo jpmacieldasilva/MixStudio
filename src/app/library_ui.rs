@@ -1,6 +1,28 @@
 use super::*;
 
 impl App {
+    pub(super) fn seed_library_demo_metadata(&mut self) {
+        const MAP: &[(&str, &str, &str)] = &[
+            ("kick", "Vessel", "Odile Varga"),
+            ("pad", "Skyline", "Metro Unit"),
+            ("bass", "Depth Charge", "Low End Collective"),
+            ("rave", "Afterglow", "Night Driver"),
+        ];
+        for e in self.lib.index.entries.iter_mut() {
+            let low = if e.title.is_empty() {
+                e.filename().to_lowercase()
+            } else {
+                e.title.to_lowercase()
+            };
+            for (needle, title, artist) in MAP {
+                if low.contains(needle) {
+                    e.title = (*title).into();
+                    e.artist = (*artist).into();
+                    break;
+                }
+            }
+        }
+    }
     fn lib_import_settings(&mut self, ui: &mut egui::Ui) {
         let dim = |s: &str| egui::RichText::new(s.to_string()).color(DIM).size(11.0);
         ui.separator();
@@ -69,6 +91,7 @@ pub(super) struct State {
     /// Studio sidebar: 0 = library picker, 1 = mix track list
     pub side_tab:u8,
     pub import_open:bool,
+    pub demo_meta_done:bool,
 }
 /// Full-width navigation row: name truncated to fit, count right-aligned.
 fn nav_row(ui:&mut egui::Ui,name:&str,count:usize,selected:bool)->egui::Response {
@@ -202,6 +225,14 @@ impl App {
         }
     }
     pub(super) fn library_tab(&mut self,ui:&mut egui::Ui) {
+        if std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library")
+            && !self.library_ui.demo_meta_done
+            && !self.lib.index.entries.is_empty()
+        {
+            self.seed_library_demo_metadata();
+            self.library_ui.demo_meta_done = true;
+            self.refresh_library_view();
+        }
         if self.top == 2 {
             self.library_files(ui);
             return;

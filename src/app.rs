@@ -226,16 +226,6 @@ impl App {
                     a.top = 2; a.tab = Tab::Library; a.sel = None; a.sel_in = None; a.lib_key = true; a.lib_bpm = true; a.lib_pct = 6.0;
                     a.lib.cfg.folders = vec![demo_dir.display().to_string()];
                     a.lib.rescan();
-                    const CAPTURE_META: [(&str, &str); 4] = [
-                        ("Vessel", "Odile Varga"),
-                        ("Skyline", "Metro Unit"),
-                        ("Depth Charge", "Low End Collective"),
-                        ("Afterglow", "Night Driver"),
-                    ];
-                    for (e, (title, artist)) in a.lib.index.entries.iter_mut().zip(CAPTURE_META.iter()) {
-                        e.title = (*title).into();
-                        e.artist = (*artist).into();
-                    }
                     a.refresh_library_view();
                     a.lib_sort = crate::library::SortCol::Title;
                     a.refresh_library_view();
