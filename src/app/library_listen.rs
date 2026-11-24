@@ -62,12 +62,11 @@ impl App {
         let has_err = error.is_some();
         let subtitle = match (&error,&ready) { (Some(e),_)=>format!("Cannot play: {e}"), (None,None)=>"Loading…".into(), (None,Some(_))=>"First drop · original tempo".into() };
         let mut stop=false; let mut seek=None;
-        egui::Frame::none().fill(C::from_rgb(40,40,24)).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32,C::from_rgb(110,106,30))).inner_margin(egui::Margin::symmetric(8.0,4.0)).show(ui,|ui|{
+        egui::Frame::none().fill(ROW).rounding(Rounding::same(6.0)).stroke(Stroke::new(1.0_f32,LINE_SOFT)).inner_margin(egui::Margin::symmetric(8.0,4.0)).show(ui,|ui|{
             ui.horizontal(|ui|{
-                if ui.add(egui::Button::new(egui::RichText::new("⏹").color(BG)).fill(ACCENT).min_size(vec2(28.0,24.0))).on_hover_text("Stop preview (Space)").clicked() { stop=true; }
+                if ui.add(egui::Button::new(egui::RichText::new("▶").color(TXT)).fill(C::from_rgb(52,54,60)).rounding(14.0).min_size(vec2(28.0,28.0))).on_hover_text("Stop preview (Space)").clicked() { stop=true; }
                 ui.vertical(|ui|{ ui.spacing_mut().item_spacing.y=0.0;
-                    ui.add(egui::Label::new(egui::RichText::new(&title).strong().size(12.5)).truncate());
-                    ui.label(egui::RichText::new(subtitle).size(10.5).color(if has_err {C::LIGHT_RED} else {DIM}));
+                    ui.add(egui::Label::new(egui::RichText::new(format!("{title} · {subtitle}")).size(12.0).color(TXT)).truncate());
                 });
                 let Some((_,an))=&ready else { if error.is_none() { ui.spinner(); } return; };
                 let pos=sec_at(an,self.engine_beat()).clamp(0.0,an.duration);
@@ -80,7 +79,7 @@ impl App {
                         let v=an.peaks.get(lo..hi).map(|p|p.iter().map(|x|x[0].max(x[1]).max(x[2])).max().unwrap_or(0)).unwrap_or(0) as f32/255.0;
                         let x=rect.left()+c as f32*2.0+1.0; let h=(v*rect.height()*0.9).max(1.0);
                         let played=(c as f32)/(columns as f32)<=(pos/an.duration) as f32;
-                        painter.line_segment([pos2(x,rect.center().y-h*0.5),pos2(x,rect.center().y+h*0.5)],Stroke::new(1.5_f32,if played {ACCENT} else {C::from_rgb(110,112,120)}));
+                        painter.line_segment([pos2(x,rect.center().y-h*0.5),pos2(x,rect.center().y+h*0.5)],Stroke::new(1.2_f32,if played {C::from_rgb(48,178,168)} else {C::from_rgb(90,92,98)}));
                     }
                     let x=rect.left()+rect.width()*(pos/an.duration) as f32; painter.line_segment([pos2(x,rect.top()),pos2(x,rect.bottom())],Stroke::new(1.5_f32,TXT));
                     if let Some(p)=response.interact_pointer_pos() { if response.clicked() || response.dragged() { seek=Some(beat_at(an,((p.x-rect.left())/rect.width()).clamp(0.0,1.0) as f64*an.duration)); } }

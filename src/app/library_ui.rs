@@ -25,12 +25,16 @@ impl App {
             return;
         }
         let titles = [
-            "Neon Drive", "Midnight Pulse", "Crystal Floor", "Gravity Well", "Solar Drift", "Velvet Rush", "Iron Bloom",
-            "Echo Chamber", "Low Tide", "High Voltage", "Amber Lines", "Static Dreams", "Phase Runner", "Deep Signal",
+            "Vessel", "Bass Test E minor", "Concrete Bloom", "Low Tide Signal", "Pad Test C major", "Salt Glass",
+            "Hollow Arcade", "Mirror Stage", "Kick Test A minor", "Neon Drive", "Midnight Pulse", "Gravity Well",
+            "Velvet Rush", "Iron Bloom", "Echo Chamber", "High Voltage", "Amber Lines", "Static Dreams", "Phase Runner",
+            "Deep Signal", "Midnight Ferry", "Pacific State", "Urban Motion", "Silver Line", "Amber Coast", "North Station",
+            "Late Arrival", "Echo Rooms", "Coastal Drive", "Blue District", "Disco Arcade", "Neon Avenue",
         ];
         let artists = [
             "Vessel", "Odile Varga", "Skyline", "Metro Unit", "Depth Charge", "Low End Collective", "Night Driver",
-            "Afterglow", "Maris Vega", "North Works", "Analog Youth", "Kite Theory",
+            "Afterglow", "Maris Vega", "North Works", "Analog Youth", "Kite Theory", "Kick Lab", "Pad Unit",
+            "Low End", "Raver", "Sunrise Avenue", "Pacific State", "Urban Motion",
         ];
         let keys = ["8A", "8B", "9A", "10A", "11B", "12A", "6A", "7B", "5A", "4B"];
         let bpms = [124.0, 126.0, 128.0, 130.0, 122.0, 118.0, 132.0, 127.5, 125.0, 129.0];
@@ -39,8 +43,8 @@ impl App {
         while n < TARGET {
             let mut e = templates[i % templates.len()].clone();
             e.path = format!("{}/catalog/track_{n:04}.wav", folder);
-            e.title = titles[i % titles.len()].into();
-            e.artist = artists[i % artists.len()].into();
+            e.title = titles[(n * 5 + 3) % titles.len()].into();
+            e.artist = artists[(n * 7 + 1) % artists.len()].into();
             e.bpm = Some(bpms[i % bpms.len()]);
             e.key = Some(keys[i % keys.len()].into());
             e.duration = 360.0 + (i % 180) as f64;
@@ -394,11 +398,10 @@ impl App {
         ui.horizontal_wrapped(|ui|{
             toggle_button(ui, &mut self.lib_key, "Compatible key");
             toggle_button(ui, &mut self.lib_bpm, "BPM range");
-            if !self.lib_bpm {
-                self.lib_pct = 6.0;
+            if self.lib_bpm {
+                ui.add(egui::DragValue::new(&mut self.lib_pct).range(1.0..=30.0).speed(0.2).prefix("±").suffix(" %"));
             }
-            ui.add_enabled(self.lib_bpm, egui::DragValue::new(&mut self.lib_pct).range(1.0..=30.0).speed(0.2).prefix("±").suffix(" %"));
-            ui.menu_button(egui::RichText::new("Columns").size(11.5), |ui| {
+            ui.menu_button(egui::RichText::new("Columns v").size(11.5).color(DIM), |ui| {
                 toggle_button(ui, &mut self.library_ui.details, "Folder & genre columns");
             });
             let total = self.lib.index.entries.len();
@@ -457,10 +460,14 @@ impl App {
                 let in_mix = self.mix.tracks.iter().any(|t| t.path == e.path);
                 let status = if in_mix { "In mix" } else if e.bpm.is_some() && e.key.is_some() { "Ready" } else if unavailable { "Missing" } else { "Indexed" };
                 row.col(|ui|{ui.label(egui::RichText::new(status).size(11.5).color(if in_mix { FOCUS } else { DIM }));});
-                let response=row.response().on_hover_ui(|ui|{ui.set_max_width(480.0);ui.strong(e.filename());ui.label(format!("{} · {}",e.artist,e.title));ui.label(egui::RichText::new(&e.path).size(11.0).color(DIM));
-                    if let Some((source,track))=self.lib.ext_info(&e.path){ui.label(format!("{} tags: {} BPM · {}",source.name(),track.bpm.map(|b|format!("{b:.2}")).unwrap_or_else(||"unknown".into()),track.key.as_deref().unwrap_or("unknown")));}
-                    if let Some(error)=&e.error{ui.colored_label(C::LIGHT_RED,error);}else if unavailable{ui.colored_label(C::YELLOW,"Source drive is unavailable");}
-                });
+                let response=if library_capture_demo() {
+                    row.response()
+                } else {
+                    row.response().on_hover_ui(|ui|{ui.set_max_width(480.0);ui.strong(e.filename());ui.label(format!("{} · {}",e.artist,e.title));ui.label(egui::RichText::new(&e.path).size(11.0).color(DIM));
+                        if let Some((source,track))=self.lib.ext_info(&e.path){ui.label(format!("{} tags: {} BPM · {}",source.name(),track.bpm.map(|b|format!("{b:.2}")).unwrap_or_else(||"unknown".into()),track.key.as_deref().unwrap_or("unknown")));}
+                        if let Some(error)=&e.error{ui.colored_label(C::LIGHT_RED,error);}else if unavailable{ui.colored_label(C::YELLOW,"Source drive is unavailable");}
+                    })
+                };
                 if response.double_clicked(){double=Some(e.path.clone());}else if response.clicked(){click=Some((k,mods));}
                 if response.drag_started()&&!self.arrangement_locked(){let paths=if selected{self.library_selected_paths()}else{vec![e.path.clone()]};response.dnd_set_drag_payload(LibDrag(paths.clone()));drag=Some(paths);}
             });});

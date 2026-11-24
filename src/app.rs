@@ -168,6 +168,12 @@ fn key_col(k: &str) -> C {
     let n: f32 = k.trim_end_matches(['A', 'B']).parse().unwrap_or(1.0);
     let (r, g, b) = hsv((n - 1.0) / 12.0, if k.ends_with('A') { 0.35 } else { 0.5 }, 0.95); C::from_rgb(r, g, b)
 }
+/// Dark clip fill with a subtle Camelot key tint (burgundy/teal/etc.).
+fn key_body_tint(k: &str) -> C {
+    let kc = key_col(k);
+    let mix = |base: u8, tint: u8| ((base as f32) * 0.62 + (tint as f32) * 0.38) as u8;
+    C::from_rgb(mix(ROW.r(), kc.r()), mix(ROW.g(), kc.g()), mix(ROW.b(), kc.b()))
+}
 fn hsv(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     let i = (h * 6.0).floor(); let f = h * 6.0 - i; let (p, q, t) = (v * (1.0 - s), v * (1.0 - f * s), v * (1.0 - (1.0 - f) * s));
     let (r, g, b) = match i as i32 % 6 { 0 => (v, t, p), 1 => (q, v, p), 2 => (p, v, t), 3 => (p, q, v), 4 => (t, p, v), _ => (v, p, q) };
@@ -256,22 +262,35 @@ impl App {
                     a.library_ui.folder = None;
                     a.lib.abort_scan();
                     a.seed_library_demo_catalog(demo_dir);
-                    a.seed_library_demo_metadata();
                     a.library_ui.demo_meta_done = true;
                     a.refresh_library_view();
-                    a.lib_sort = crate::library::SortCol::Title;
+                    a.lib_sort = crate::library::SortCol::Bpm;
+                    a.lib_asc = false;
                     a.refresh_library_view();
-                    let pick: Vec<_> = a.lib_view.iter().take(2).filter_map(|&i| a.library_entries().get(i).map(|e| e.path.clone())).collect();
-                    a.lib_sel = pick.iter().cloned().collect();
-                    a.lib_anchor = pick.first().cloned();
-                    if let Some(p) = pick.first().cloned().filter(|p| a.store.contains_key(p)) {
-                        let title = a
+                    let pick = a
+                        .lib
+                        .index
+                        .entries
+                        .iter()
+                        .find(|e| e.title == "Salt Glass")
+                        .or_else(|| a.lib.index.entries.iter().nth(5))
+                        .map(|e| e.path.clone());
+                    a.lib_sel.clear();
+                    a.lib_anchor = pick.clone();
+                    if let Some(p) = pick {
+                        a.lib_sel.insert(p.clone());
+                        let (title, artist) = a
                             .library_entries()
                             .iter()
-                            .find(|e| e.path == *p)
-                            .map(|e| if e.title.is_empty() { e.filename().to_string() } else { e.title.clone() })
-                            .unwrap_or_else(|| "Preview".into());
-                        a.toggle_listen(p.clone(), title, ctx);
+                            .find(|e| e.path == p)
+                            .map(|e| {
+                                (
+                                    if e.title.is_empty() { e.filename().to_string() } else { e.title.clone() },
+                                    e.artist.clone(),
+                                )
+                            })
+                            .unwrap_or_else(|| ("Salt Glass".into(), "Odile Varga".into()));
+                        a.toggle_listen(p, format!("{title} · {artist}"), ctx);
                         let _ = a.out.tx.send(Cmd::Play(false));
                     }
                 }
@@ -740,19 +759,19 @@ impl App {
         }
     }
     pub(super) fn timeline_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.set_height(36.0);
+        ui.set_height(28.0);
         ui.horizontal(|ui| {
             egui::Frame::none()
                 .fill(CTRL_FILL)
                 .rounding(6.0)
-                .inner_margin(egui::Margin::symmetric(4.0, 2.0))
+                .inner_margin(egui::Margin::symmetric(3.0, 1.0))
                 .stroke(Stroke::new(1.0_f32, LINE_SOFT))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        if theme::seg_button(ui, "Move", !self.select_sections).on_hover_text("Drag clips (V)").clicked() {
+                        if theme::seg_button(ui, "↔ Move", !self.select_sections).on_hover_text("Drag clips (V)").clicked() {
                             self.select_sections = false;
                         }
-                        if theme::seg_button(ui, "Select", self.select_sections).on_hover_text("Drag a range (R)").clicked() {
+                        if theme::seg_button(ui, "[] Select", self.select_sections).on_hover_text("Drag a range (R)").clicked() {
                             self.select_sections = true;
                             self.drag = None;
                             self.auto_track = None;
@@ -764,10 +783,48 @@ impl App {
                 ui.add_space(6.0);
                 self.control_bar_edit(ui);
             }
+            let snap = match self.snapping {
+                Snapping::Off => "Off",
+                Snapping::Free => "Beat",
+                Snapping::Half => "Half Bar",
+                Snapping::Full => "Bar",
+            };
+            ui.menu_button(egui::RichText::new(format!("Snap: {snap} v")).size(11.0).color(DIM), |ui| {
+                ui.selectable_value(&mut self.snapping, Snapping::Off, "Snap: Off");
+                ui.selectable_value(&mut self.snapping, Snapping::Free, "Snap: Beat");
+                ui.selectable_value(&mut self.snapping, Snapping::Half, "Snap: Half Bar");
+                ui.selectable_value(&mut self.snapping, Snapping::Full, "Snap: Bar");
+            });
+            let snap_on = self.snapping != Snapping::Off;
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("Magnet").size(10.0).color(if snap_on { TXT } else { DIM }))
+                        .fill(C::TRANSPARENT)
+                        .frame(false)
+                        .min_size(vec2(26.0, 26.0)),
+                )
+                .on_hover_text(if snap_on { "Snap on" } else { "Snap off" })
+                .clicked()
+            {
+                self.snapping = if snap_on { Snapping::Off } else { Snapping::Full };
+            }
+            let follow_on = self.follow;
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("◎ Follow").size(11.0).color(if follow_on { TXT } else { DIM }))
+                        .fill(C::TRANSPARENT)
+                        .frame(false)
+                        .min_size(vec2(52.0, 26.0)),
+                )
+                .on_hover_text("Follow playhead (F)")
+                .clicked()
+            {
+                self.follow = !self.follow;
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 if ui
-                    .add(egui::Button::new(egui::RichText::new("Zoom to Fit").size(11.0)))
+                    .add(egui::Button::new(egui::RichText::new("Zoom to Fit").size(11.0).color(DIM)).frame(false))
                     .on_hover_text("Fit the whole mix in view")
                     .clicked()
                 {
@@ -776,44 +833,6 @@ impl App {
                     self.scroll = 0.0;
                 }
                 ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).show_value(false));
-                let snap = match self.snapping {
-                    Snapping::Off => "Off",
-                    Snapping::Free => "Beat",
-                    Snapping::Half => "Half Bar",
-                    Snapping::Full => "Bar",
-                };
-                ui.menu_button(egui::RichText::new(format!("Snap: {snap}")).size(11.0), |ui| {
-                    ui.selectable_value(&mut self.snapping, Snapping::Off, "Snap: Off");
-                    ui.selectable_value(&mut self.snapping, Snapping::Free, "Snap: Beat");
-                    ui.selectable_value(&mut self.snapping, Snapping::Half, "Snap: Half Bar");
-                    ui.selectable_value(&mut self.snapping, Snapping::Full, "Snap: Bar");
-                });
-                let lock_on = self.lock;
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("🔒").size(13.0).color(if lock_on { TXT } else { DIM }))
-                            .fill(C::TRANSPARENT)
-                            .frame(false)
-                            .min_size(vec2(28.0, 28.0)),
-                    )
-                    .on_hover_text(if lock_on { "Arrangement locked" } else { "Lock arrangement edits" })
-                    .clicked()
-                {
-                    self.lock = !self.lock;
-                }
-                let follow_on = self.follow;
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new(if follow_on { "◎" } else { "○" }).size(14.0).color(if follow_on { TXT } else { DIM }))
-                            .fill(C::TRANSPARENT)
-                            .frame(false)
-                            .min_size(vec2(28.0, 28.0)),
-                    )
-                    .on_hover_text("Follow playhead (F)")
-                    .clicked()
-                {
-                    self.follow = !self.follow;
-                }
             });
         });
     }
@@ -1038,12 +1057,14 @@ impl App {
         if self.arrangement_locked() {self.samples.copy=None;self.samples.box_origin=None;self.stem_volume_drag=None;self.drag=None;self.tl_drag=None;self.grid_drag=None;self.bm_drag=None;}
         let full = ui.available_rect_before_wrap();
         let mini_h = 12.0;
-        let tool_h = 34.0;
-        let head = Rect::from_min_max(full.min, pos2(full.left() + HEAD_W, full.top() + mini_h + tool_h));
-        let mini = Rect::from_min_max(pos2(head.right(), full.top()), pos2(full.right(), full.top() + mini_h));
-        let tool_strip = Rect::from_min_max(pos2(head.right(), mini.bottom()), pos2(full.right(), mini.bottom() + tool_h));
-        let area = Rect::from_min_max(pos2(full.left(), tool_strip.bottom()), full.max);
-        let tl_x0 = area.left() + HEAD_W; let tl_w = area.right() - tl_x0;
+        let tool_h = 28.0;
+        let tl_x0 = full.left() + HEAD_W;
+        let tl_w = full.right() - tl_x0;
+        let mini = Rect::from_min_max(pos2(tl_x0, full.top()), pos2(full.right(), full.top() + mini_h));
+        let tool_strip = Rect::from_min_max(pos2(tl_x0, mini.bottom()), pos2(full.right(), mini.bottom() + tool_h));
+        let ruler = Rect::from_min_max(pos2(tl_x0, tool_strip.bottom()), pos2(full.right(), tool_strip.bottom() + RULER_H));
+        let head = Rect::from_min_max(full.min, pos2(full.left() + HEAD_W, ruler.bottom()));
+        let area = Rect::from_min_max(pos2(full.left(), ruler.bottom()), full.max);
         egui::Frame::none().fill(BG_WELL).show(ui, |ui| {
             ui.allocate_ui_at_rect(tool_strip, |ui| {
                 ui.set_height(tool_h);
@@ -1068,7 +1089,8 @@ impl App {
         let p = ui.painter().clone();
 
         p.rect_filled(head, 0.0, BG_WELL);
-        p.rect_filled(tool_strip, 0.0, BG_WELL);
+        p.rect_filled(tool_strip, 0.0, PANEL);
+        p.line_segment([tool_strip.left_bottom(), tool_strip.right_bottom()], Stroke::new(1.0_f32, LINE_SOFT));
         // minimap / overview (timeline column only — not a yellow band above the ruler)
         p.rect_filled(mini, 0.0, C::from_rgb(22, 23, 26));
         let mw = mini.width() - 20.0; let mxf = |b: f64| mini.left() + 10.0 + (b / len) as f32 * mw;
@@ -1080,7 +1102,6 @@ impl App {
         if let Some(pp) = mr.interact_pointer_pos() { if mr.dragged() || mr.clicked() { self.scroll = (((pp.x - mini.left() - 10.0) / mw) as f64 * len - (tl_w / ppb) as f64 / 2.0).clamp(-16.0, len); self.follow = false; } }
 
         const TRANS_STRIP_H: f32 = 22.0;
-        let ruler = Rect::from_min_max(area.min, pos2(area.right(), area.top() + RULER_H));
         let mut y = ruler.bottom();
         let mut rows = vec![];
         let deck_h = ((area.bottom() - y - 2.0 * SAMPLE_H - TEMPO_H - TRANS_STRIP_H) / 2.0).clamp(96.0, 230.0) * if self.vzoom { 1.8 } else { 1.0 };
@@ -1114,8 +1135,21 @@ impl App {
         // grid
         let b0 = xb(tl_x0).floor().max(-16.0) as i64; let b1 = xb(area.right()).ceil() as i64;
         let step = if ppb < 1.5 { 16 } else if ppb < 4.0 { 4 } else { 1 };
-        for b in b0..=b1 { if b.rem_euclid(step) != 0 { continue; } let x = bx(b as f64);
-            tp.line_segment([pos2(x, ruler.bottom()), pos2(x, y)], Stroke::new(1.0_f32, if b.rem_euclid(4) == 0 { C::from_rgb(44, 46, 52) } else { C::from_rgb(35, 37, 41) })); }
+        let beat_grid = C::from_rgba_unmultiplied(255, 255, 255, 15);
+        for b in b0..=b1 {
+            if b.rem_euclid(step) != 0 {
+                continue;
+            }
+            let x = bx(b as f64);
+            if b.rem_euclid(4) == 0 {
+                tp.line_segment([pos2(x, ruler.bottom() - 8.0), pos2(x, ruler.bottom())], Stroke::new(1.0_f32, DIM));
+            } else {
+                for lane in 0..2 {
+                    let r = rows[lane].1;
+                    tp.line_segment([pos2(x, r.top()), pos2(x, r.bottom())], Stroke::new(1.0_f32, beat_grid));
+                }
+            }
+        }
         // ruler
         p.rect_filled(ruler, 0.0, PANEL);
         let sec_px = ppb as f64 * bpm / 60.0;
@@ -1151,19 +1185,30 @@ impl App {
             let vis = clip(cr);
             let sample = t.lane >= 2;
             let selected = self.sel == Some(ti) || (sample && self.samples.selected.contains(&ti));
-            let body_col = C::from_rgb(20, 21, 24);
-            let title_h = if sample { 14.0 } else { 18.0 };
+            let body_col = if sample { ROW } else { key_body_tint(&t.key) };
+            let title_h = 14.0;
             let tr = Rect::from_min_max(cr.min, pos2(cr.right(), cr.top() + title_h));
-            tp.rect_filled(Rect::from_min_max(pos2(cr.left(), tr.bottom()), cr.max), 0.0, body_col);
+            tp.rect_filled(cr, 0.0, body_col);
             let kc = key_col(&t.key);
-            tp.rect_filled(tr, 0.0, C::from_rgb(24, 25, 28));
-            tp.rect_filled(Rect::from_min_max(tr.min, pos2(tr.left() + 3.0, tr.bottom())), 0.0, kc.gamma_multiply(0.55));
-            let mut x = vis.left() + 6.0;
+            tp.rect_filled(tr, 0.0, C::from_rgb(20, 21, 24));
+            let mut x = vis.left() + 5.0;
             if !sample {
-                let kr = Rect::from_min_size(pos2(x, tr.top() + 2.0), vec2(22.0, title_h - 4.0));
-                tp.rect_filled(kr, 3.0, kc.gamma_multiply(0.72));
-                tp.text(kr.center(), Align2::CENTER_CENTER, &t.key, FontId::proportional(9.0), if kc.g() > 140 { C::BLACK } else { TXT });
-                x += 26.0;
+                let kr = Rect::from_min_size(pos2(x, tr.top() + 1.0), vec2(20.0, title_h - 2.0));
+                tp.rect_filled(kr, 2.0, kc.gamma_multiply(0.38));
+                tp.text(kr.center(), Align2::CENTER_CENTER, &t.key, FontId::proportional(8.5), if kc.g() > 140 { C::BLACK } else { TXT });
+                x += 24.0;
+                tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, FontId::proportional(10.0), TXT);
+                let tw = tp.layout_no_wrap(t.title.clone(), FontId::proportional(10.0), TXT).size().x;
+                if !t.artist.is_empty() && x + tw + 8.0 < vis.right() - 40.0 {
+                    tp.text(
+                        pos2(x + tw + 6.0, tr.center().y),
+                        Align2::LEFT_CENTER,
+                        &t.artist,
+                        FontId::proportional(9.5),
+                        MUTED,
+                    );
+                }
+                x = vis.right();
             }
             if let Some(pr) = self.stem_prog.get(&t.path) { let v = pr.load(std::sync::atomic::Ordering::Relaxed) as f32 / 10.0; let dl = self.dl_prog.load(std::sync::atomic::Ordering::Relaxed);
                 let txt = if v == 0.0 && dl > 0 && dl < 1000 { format!("○ Downloading stem model {:.0}%", dl as f32 / 10.0) } else { format!("○ Separating stems {v:.0}%") };
@@ -1171,8 +1216,10 @@ impl App {
                 if r.left() > vis.left() + 60.0 { tp.rect_filled(r, 3.0, C::from_rgb(30, 30, 34)); tp.rect_filled(Rect::from_min_size(r.min, vec2(w * v / 100.0, r.height())), 3.0, C::from_rgb(60, 70, 140));
                     tp.text(r.center(), Align2::CENTER_CENTER, txt, FontId::proportional(9.5), TXT); } }
             else if !sample && self.stems.contains_key(&t.path) { tp.text(pos2(vis.right() - 6.0, tr.center().y), Align2::RIGHT_CENTER, "STEMS", FontId::proportional(8.5), C::from_rgb(200, 220, 255)); }
-            tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, if sample { t.title.clone() } else { format!("{} - {}", t.artist, t.title) }, FontId::proportional(if sample { 9.5 } else { 10.5 }), TXT);
-            let wave = Rect::from_min_max(pos2(cr.left(), tr.bottom() + if sample { 0.0 } else { 12.0 }), pos2(cr.right(), cr.bottom() - if sample { 0.0 } else { 9.0 }));
+            if sample {
+                tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, FontId::proportional(9.5), TXT);
+            }
+            let wave = Rect::from_min_max(pos2(cr.left() + 1.0, tr.bottom() + 2.0), pos2(cr.right() - 1.0, cr.bottom() - 2.0));
             let cps = an.peak_sr as f64 / PEAK_HOP as f64;
             let (cy, hh) = (wave.center().y, wave.height() / 2.0);
             let mut overlap: Vec<(f64, f64, bool, usize)> = fragment_trans.iter().filter(|x| x.0 == ti || x.1 == ti).map(|x| (x.2, x.3, x.0 == ti, x.1)).collect();
@@ -1181,9 +1228,11 @@ impl App {
             let my_stems = self.stems.get(&t.path);
             let tstyle = self.mix.trans_stem_style; let tsc = |k: usize| { let c = STEM[k]; match tstyle { 1 => C::from_rgb(c.r() / 2 + 40, c.g() / 2 + 40, c.b() / 2 + 40), 2 => C::from_rgb(255 - c.r(), 255 - c.g(), 255 - c.b()), _ => c } };
             let grid = t.grid();
+            let wave_step = if ppb < 18.0 { 2.5_f32 } else { 1.0_f32 };
+            let wave_scale = if ppb < 18.0 { 0.28_f32 } else if ppb < 40.0 { 0.42_f32 } else { 0.58_f32 };
             let mut px = vis.left().floor();
             while px < vis.right() {
-                let (bb0, bb1) = (xb(px), xb(px + 1.0));
+                let (bb0, bb1) = (xb(px), xb((px + wave_step).min(vis.right())));
                 let c0 = (grid.sec(bb0) * cps) as i64;
                 let c1 = ((grid.region_sec(bb1, bb0) * cps) as i64).max(c0 + 1);
                 if c0 >= 0 && (c0 as usize) < an.peaks.len() {
@@ -1211,28 +1260,19 @@ impl App {
                             tp.line_segment([pos2(px + 0.5, ly - a), pos2(px + 0.5, ly + a)], Stroke::new(1.0_f32, if muted { C::from_rgba_unmultiplied(150, 150, 150, 60) } else { col }));
                         }
                     } else if sample {
-                        let lo = f(m[0]) * (wave.height() * 0.5);
-                        let mi = f(m[1]) * (wave.height() * 0.35);
-                        let wave_col = C::from_rgb(56, 196, 184);
-                        let hi_col = C::from_rgb(220, 232, 238);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, wave_col));
-                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(1.0_f32, hi_col.gamma_multiply(0.75)));
+                        let lo = (f(m[0]) * hh * wave_scale).min(hh * 0.45);
+                        let wave_col = C::from_rgb(48, 178, 168).gamma_multiply(0.9);
+                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(0.75_f32, wave_col));
                     } else {
-                        let (lo, mi) = (f(m[0]) * hh, f(m[1]) * hh * 0.65);
-                        let wave_col=C::from_rgb(56, 196, 184);
-                        let hi_col=C::from_rgb(220, 232, 238);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, wave_col));
-                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(1.0_f32, hi_col.gamma_multiply(0.75)));
+                        let lo = (f(m[0]) * hh * wave_scale).min(hh * 0.48);
+                        let mi = (f(m[1]) * hh * wave_scale * 0.65).min(hh * 0.32);
+                        let wave_col = C::from_rgb(48, 178, 168).gamma_multiply(0.92);
+                        let hi_col = C::from_rgb(200, 212, 218).gamma_multiply(0.65);
+                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(0.75_f32, wave_col));
+                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(0.75_f32, hi_col));
                     }
                 }
-                px += 1.0;
-            }
-            if !sample && ppb * 4.0 >= 3.0 { // bar lines red, beats yellow; bars stay visible zoomed out
-                let k0 = (xb(vis.left()) - t.start_beat).ceil() as i64; let k1 = (xb(vis.right()) - t.start_beat).floor() as i64;
-                let beats_on = ppb >= 5.0; let bar_step = if ppb * 4.0 >= 6.0 { 4 } else { 16 };
-                for k in k0..=k1 { let down = k.rem_euclid(4) == 0; if !beats_on && k.rem_euclid(bar_step) != 0 { continue; } let x = bx(t.start_beat + k as f64);
-                    let (w, c) = if down { (1.3_f32, C::from_rgba_unmultiplied(235, 60, 60, 170)) } else { (1.0_f32, C::from_rgba_unmultiplied(80, 82, 88, 55)) };
-                    tp.line_segment([pos2(x, wave.top()), pos2(x, wave.bottom())], Stroke::new(w, c)); }
+                px += wave_step;
             }
             if !sample && self.sel_in.is_some() { for o in &overlap {
                 if my_stems.is_some() && self.stems.contains_key(&self.mix.tracks[partner(o)].path) { continue; }
@@ -1284,13 +1324,10 @@ impl App {
                         tp.rect_filled(r, 1.5, STEM[k].gamma_multiply(0.7)); } }
             }
             for cut in grid.cuts() { let x=bx(cut); if x>=vis.left() && x<=vis.right() {
-                tp.line_segment([pos2(x,wave.top()),pos2(x,wave.bottom())],Stroke::new(1.5_f32,ACCENT));
-                tp.text(pos2(x+3.0,wave.top()+3.0),Align2::LEFT_TOP,"|",FontId::proportional(10.0),ACCENT);
+                tp.line_segment([pos2(x,wave.top()),pos2(x,wave.bottom())],Stroke::new(1.0_f32,C::from_rgba_unmultiplied(255,255,255,40)));
             } }
             if selected {
-                tp.rect_stroke(cr, 2.0, Stroke::new(1.0_f32, C::from_rgb(210, 214, 222)));
-            } else {
-                tp.rect_stroke(cr, 2.0, Stroke::new(1.0, C::from_rgb(48, 50, 56)));
+                tp.rect_stroke(cr, 0.0, Stroke::new(1.0_f32, C::from_rgb(210, 214, 222)));
             }
             let resp = ui.interact(vis, ui.id().with(("clip", ti)), Sense::click_and_drag());
             if let Some(pp) = resp.interact_pointer_pos() {
@@ -1478,31 +1515,30 @@ impl App {
             let x1 = bx(e).min(area.right());
             if x1 <= x0 + 4.0 { continue; }
             let sel = self.sel_in == Some(i);
-            let chip = Rect::from_min_max(pos2(x0 + 2.0, trans_strip.top() + 3.0), pos2(x1 - 2.0, trans_strip.bottom() - 3.0));
-            let (_, col, lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
-            tp.rect_filled(chip, 4.0, if sel { C::from_rgb(52, 54, 60) } else { C::from_rgb(38, 40, 44) });
-            tp.rect_stroke(chip, 4.0, Stroke::new(if sel { 1.25_f32 } else { 1.0 }, if sel { C::from_rgb(108, 112, 120) } else { LINE }));
-            tp.circle_filled(pos2(chip.left() + 8.0, chip.center().y), 3.5, compat_col(col));
+            let (_, col, _lab) = crate::automix::rate(&self.ao_item(o), &self.ao_item(i));
             let tt = &self.mix.tracks[i].trans;
-            let nst = tt.stems.iter().filter(|m| **m != StemMode::Crossfade).count();
             let bars = ((e - s) / 4.0).round();
             let label = format!("{} · {:.0} bars", tt.preset.name(), bars);
+            let chip_w = (label.len() as f32 * 5.4 + 34.0).clamp(90.0, 200.0);
+            let chip_left = ((x0 + x1 - chip_w) * 0.5).max(x0 + 2.0);
+            let chip = Rect::from_min_max(
+                pos2(chip_left, trans_strip.top() + 3.0),
+                pos2((chip_left + chip_w).min(x1 - 2.0), trans_strip.bottom() - 3.0),
+            );
+            tp.rect_filled(chip, 4.0, C::from_rgb(40, 42, 46));
+            tp.rect_stroke(
+                chip,
+                4.0,
+                Stroke::new(if sel { 1.2_f32 } else { 1.0_f32 }, if sel { C::from_rgb(120, 124, 132) } else { LINE }),
+            );
+            tp.circle_filled(pos2(chip.left() + 8.0, chip.center().y), 3.0, C::from_rgb(110, 114, 120));
             tp.text(
                 pos2(chip.left() + 16.0, chip.center().y),
                 Align2::LEFT_CENTER,
                 label,
                 FontId::proportional(10.0),
-                if sel { TXT } else { DIM },
+                DIM,
             );
-            if chip.width() > 120.0 {
-                tp.text(
-                    pos2(chip.right() - 8.0, chip.center().y),
-                    Align2::RIGHT_CENTER,
-                    format!("{} -> {}", self.mix.tracks[o].key, self.mix.tracks[i].key),
-                    FontId::proportional(9.5),
-                    MUTED,
-                );
-            }
             if sel {
                 for x in [bx(s), bx(e)] {
                     if x >= tl_x0 && x <= area.right() {
@@ -1952,31 +1988,24 @@ impl App {
             let t=&self.mix.tracks[i];
             let path=t.path.clone();
             let missing=!self.store.contains_key(&path);
+            let bar = t.start_beat / 4.0 + 1.0;
+            let unit = if t.artist.is_empty() {
+                format!("Deck {} Unit", t.lane + 1)
+            } else {
+                t.artist.clone()
+            };
+            let kc = key_col(&t.key);
             ui.horizontal(|ui| {
-                let bar = t.start_beat / 4.0 + 1.0;
-                let unit = if t.artist.is_empty() {
-                    format!("Deck {} Unit", t.lane + 1)
-                } else {
-                    t.artist.clone()
-                };
-                ui.label(
-                    egui::RichText::new(format!("{} / {}", t.title, unit))
-                        .size(14.0)
-                        .strong()
-                        .color(TXT),
-                )
-                .on_hover_text(&path);
-                ui.label(
-                    egui::RichText::new(format!(
-                        "{} · {:.1} BPM · {} · bar {:.0}",
-                        t.key,
-                        t.bpm,
-                        fmt_t(t.duration),
-                        bar
-                    ))
-                    .size(11.5)
-                    .color(DIM),
-                );
+                egui::Frame::none()
+                    .fill(kc.gamma_multiply(0.32))
+                    .rounding(3.0)
+                    .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(&t.key).size(11.0).color(kc));
+                    });
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(&t.title).size(13.5).strong().color(TXT))
+                    .on_hover_text(&path);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if theme::seg_button(ui, "Beatgrid", seg == 1).clicked() {
                         seg = 1;
@@ -1985,6 +2014,21 @@ impl App {
                         seg = 0;
                     }
                 });
+            });
+            ui.horizontal(|ui| {
+                ui.add_space(30.0);
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {:.1} BPM · {} · Deck {} · bar {:.0}",
+                        unit,
+                        t.bpm,
+                        fmt_t(t.duration),
+                        t.lane + 1,
+                        bar
+                    ))
+                    .size(11.5)
+                    .color(DIM),
+                );
             });
             if missing {
                 ui.colored_label(C::LIGHT_RED,"Source file missing");
