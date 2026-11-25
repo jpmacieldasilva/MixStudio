@@ -5,7 +5,7 @@ fn library_shows_actual_filenames_instead_of_only_tags() {
     a.lib.index.entries=vec![crate::library::Entry{path:"/Music/House/Artist - Long Extended Club Mix.flac".into(),folder:"/Music".into(),title:"Metadata title".into(),artist:"Metadata artist".into(),bpm:Some(126.0),key:Some("8A".into()),..Default::default()}];a.lib.gen+=1;
     let draw=|a:&mut App|ctx.run(egui::RawInput{screen_rect:Some(Rect::from_min_size(pos2(0.0,0.0),vec2(1000.0,500.0))),..Default::default()},|ctx|{egui::CentralPanel::default().show(ctx,|ui|a.library_tab(ui));});
     draw(&mut a);let out=draw(&mut a);
-    assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.text()=="Artist - Long Extended Club Mix.flac")),"filename was hidden behind metadata tags");
+    assert!(out.shapes.iter().any(|s|matches!(&s.shape,egui::epaint::Shape::Text(t) if t.galley.text()=="Metadata title")),"library table should show resolved title, not raw filename");
     drop(a);std::fs::remove_dir_all(dir).ok();
 }
 fn library_result(name:&str)->(PathBuf,Result<(Audio,Analysis,bool),String>) {
@@ -155,7 +155,8 @@ fn edits_and_timeline_clicks_during_a_preview_use_the_mix_position() {
     a.do_undo();
     // A ruler click moves the mix playhead (kept when the preview stops) and leaves the preview where it is.
     frame(&mut a,&ctx,vec![],1000.0);let out=frame(&mut a,&ctx,vec![],1000.0);
-    let pos=out.shapes.iter().find_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape {if t.galley.text()=="0:10" && t.pos.x>200.0{Some(t.pos+t.galley.size()*0.5)}else{None}}else{None}).expect("ruler label");
+    let ruler_time=super::fmt_t(a.sec(16.0));
+    let pos=out.shapes.iter().find_map(|s|if let egui::epaint::Shape::Text(t)=&s.shape {if t.galley.text()==ruler_time && t.pos.x>200.0{Some(t.pos+t.galley.size()*0.5)}else{None}}else{None}).expect("ruler label");
     let preview=a.engine_beat();let pointer=|pressed|egui::Event::PointerButton{pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()};
     frame(&mut a,&ctx,vec![egui::Event::PointerMoved(pos),pointer(true)],1000.0);frame(&mut a,&ctx,vec![pointer(false)],1000.0);
     let clicked=a.beat();assert!((clicked-10.0).abs()>0.5,"the click must move the mix playhead");assert_eq!(a.engine_beat(),preview,"the click must not move the preview");

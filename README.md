@@ -152,7 +152,7 @@ The optional check reads local source files and writes an edited test mix and sh
 - The section clipboard works within the same source song.
 - Projects store source paths and edits, not the audio. Keep the original files available, or use **Locate missing audio…**.
 - File dialogs use the XDG portal, then kdialog, then zenity; `mixstudio --dialog-check` lists what works. You can also paste a folder path in the Library.
-- Video export, headphone cue, MIDI controllers and VST hosting are not implemented.
+- MIDI controllers and VST hosting are not implemented.
 
 ## Roadmap
 

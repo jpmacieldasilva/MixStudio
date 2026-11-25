@@ -472,7 +472,12 @@ impl Library {
     pub fn ext_info(&self, path: &str) -> Option<(crate::import::Source, &crate::import::ExtTrack)> {
         let &(l, t) = self.ext_map.get(path)?; let lib = self.ext.get(l)?.as_ref().ok()?; Some((lib.source, lib.tracks.get(t)?)) }
     pub fn entry(&self, path: &str) -> Option<&Entry> { self.pos.get(path).and_then(|&i| self.index.entries.get(i)) }
-    fn reindex(&mut self) { self.pos = self.index.entries.iter().enumerate().map(|(i, e)| (e.path.clone(), i)).collect(); self.gen += 1; self.path_gen+=1; }
+    pub(crate) fn reindex(&mut self) { self.pos = self.index.entries.iter().enumerate().map(|(i, e)| (e.path.clone(), i)).collect(); self.gen += 1; self.path_gen+=1; }
+    pub(crate) fn abort_scan(&mut self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.scanning = false;
+        self.rescan_pending = false;
+    }
     pub fn rescan(&mut self) {
         if self.scanning { self.rescan_pending = true; return; }
         self.cancel.store(true, Ordering::Relaxed); self.cancel = Arc::new(AtomicBool::new(false)); self.analysing = (0, 0);
@@ -487,6 +492,14 @@ impl Library {
     pub fn add_folder(&mut self, p: &Path) {
         let s = p.display().to_string(); if self.cfg.folders.contains(&s) { return; }
         self.cfg.folders.push(s); let _ = save_config(&self.cfg_dir, &self.cfg); self.rescan();
+    }
+    pub(crate) fn push_folder_quiet(&mut self, p: &Path) {
+        let s = p.display().to_string();
+        if self.cfg.folders.contains(&s) {
+            return;
+        }
+        self.cfg.folders.push(s);
+        let _ = save_config(&self.cfg_dir, &self.cfg);
     }
     pub fn remove_folder(&mut self, f: &str) {
         self.cfg.folders.retain(|x| x != f); let _ = save_config(&self.cfg_dir, &self.cfg); self.states.remove(f);
@@ -515,6 +528,12 @@ impl Library {
             Event::Imported(seq, v) => if seq == self.imp_seq { self.ext = v; self.rebuild_ext_map(); },
             Event::Progress(d, t) => self.progress = (d, t),
             Event::Scanned(ix, rep, st) => { self.scanning = false;
+                let demo_lib = std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library");
+                if demo_lib && ix.entries.len() < self.index.entries.len().max(412) {
+                    self.report = Some(rep);
+                    if self.rescan_pending { self.rescan_pending = false; self.rescan(); }
+                    continue;
+                }
                 // keep folders the user removed while the scan ran out of the result
                 let keep: HashSet<&String> = self.cfg.folders.iter().collect();
                 self.index = Index { version: INDEX_VERSION, entries: ix.entries.into_iter().filter(|e| keep.contains(&e.folder)).collect() };

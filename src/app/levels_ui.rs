@@ -14,6 +14,29 @@ impl App {
         if response.changed() {self.set_song_gain(i,db);}
         if ui.small_button("0 dB").on_hover_text("Reset this song’s gain").clicked() {self.set_song_gain(i,0.0);}
     }
+    /// Transition overlap row: label left, dB field right (no reset chip).
+    pub(super) fn transition_gain_row(&mut self, ui: &mut egui::Ui, i: usize, label: &str) {
+        let Some(t) = self.mix.tracks.get(i) else { return };
+        let mut db = t.gain_db;
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(label).size(10.5).color(DIM));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let response = ui.add(
+                    egui::DragValue::new(&mut db)
+                        .range(-24.0..=12.0)
+                        .speed(0.1)
+                        .fixed_decimals(1)
+                        .suffix(" dB"),
+                );
+                if response.changed() {
+                    self.set_song_gain(i, db);
+                }
+                response.on_hover_text(
+                    "Song gain before deck EQ/FX and master. Applies to logical split fragments; saved with the mix.",
+                );
+            });
+        });
+    }
     pub(super) fn request_source_levels(&mut self,i:usize) {
         let Some(t)=self.mix.tracks.get(i) else {return;};let path=t.path.clone();
         let Some((audio,_))=self.store.get(&path) else {self.status="Load the source before measuring levels.".into();return;};let audio=audio.clone();
@@ -25,7 +48,7 @@ impl App {
         if self.store.get(&path).is_some_and(|(current,_)|Arc::ptr_eq(current,&audio)) && self.source_levels.get(&path).is_some_and(|(current,_)|Arc::ptr_eq(current,&audio)) {self.source_levels.insert(path,(audio,Some(result)));}
     }
     pub(super) fn track_levels_ui(&mut self,ui:&mut egui::Ui,i:usize) {
-        ui.horizontal_wrapped(|ui| {self.song_gain_control(ui,i,"Song gain");});
+        self.transition_gain_row(ui, i, "Song gain");
         let path=self.mix.tracks[i].path.clone();
         let measured=self.source_levels.get(&path).filter(|(a,_)|self.store.get(&path).is_some_and(|(b,_)|Arc::ptr_eq(a,b))).map(|(_,v)|v.clone());
         match measured {
