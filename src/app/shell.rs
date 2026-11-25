@@ -51,26 +51,10 @@ impl App {
     if self.top == 2 { ShellView::Library } else { ShellView::Arrange }
   }
 
-  fn shell_editor_tab(&self) -> Option<Tab> {
-    if self.top == 2 {
-      return None;
+  pub(super) fn shell_frame_pin_demo(&mut self) {
+    if self.demo_shell_pinned {
+      return;
     }
-    if self.tab == Tab::Compare && self.comparison.incoming.is_some() {
-      return Some(Tab::Compare);
-    }
-    if self.fx_sel.is_some() {
-      return Some(Tab::Effects);
-    }
-    if self.sel.is_some() {
-      return Some(Tab::Track);
-    }
-    if self.sel_in.is_some() {
-      return Some(Tab::Transition);
-    }
-    None
-  }
-
-  fn shell_frame_pin_demo(&mut self) {
     let Ok(tab) = std::env::var("MIXSTUDIO_DEMO_TAB") else { return };
     match tab.as_str() {
       "library" => {
@@ -105,6 +89,26 @@ impl App {
       }
       _ => {}
     }
+    self.demo_shell_pinned = true;
+  }
+
+  pub(super) fn shell_editor_tab(&self) -> Option<Tab> {
+    if self.top == 2 {
+      return None;
+    }
+    if self.tab == Tab::Compare && self.comparison.incoming.is_some() {
+      return Some(Tab::Compare);
+    }
+    if self.fx_sel.is_some() {
+      return Some(Tab::Effects);
+    }
+    if self.sel_in.is_some() {
+      return Some(Tab::Transition);
+    }
+    if self.sel.is_some() {
+      return Some(Tab::Track);
+    }
+    None
   }
 
   pub(super) fn shell_frame(&mut self, ctx: &egui::Context) {
@@ -349,10 +353,16 @@ impl App {
                 if theme::seg_button(ui, "Library", lib).on_hover_text("Folders, imports and full table").clicked() {
                   self.top = 2;
                   self.tab = Tab::Library;
+                  self.sel = None;
+                  self.sel_in = None;
+                  self.fx_sel = None;
                 }
               });
             });
           ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ghost_icon_button(ui, "?", "Keyboard shortcuts (Shift+/ or Cmd+/)").clicked() {
+              self.shortcuts_help = true;
+            }
             if ui
               .add(
                 egui::Button::new(egui::RichText::new("Export").size(13.0).color(TXT))
@@ -709,7 +719,7 @@ impl App {
           "Cmd+S / Cmd+Shift+S — Save / Save as",
           "Cmd+C/V/D — Copy / Paste / Repeat section",
           "Cmd+E — Split at playhead",
-          "Cmd+/ — This list",
+          "Cmd+/ or ? (Shift+/) — This list",
           ", / . — Nudge incoming ±1 ms (Shift ±10)",
         ] {
           ui.label(line);

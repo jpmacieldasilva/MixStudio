@@ -48,7 +48,7 @@ impl App {
         if self.store.get(&path).is_some_and(|(current,_)|Arc::ptr_eq(current,&audio)) && self.source_levels.get(&path).is_some_and(|(current,_)|Arc::ptr_eq(current,&audio)) {self.source_levels.insert(path,(audio,Some(result)));}
     }
     pub(super) fn track_levels_ui(&mut self,ui:&mut egui::Ui,i:usize) {
-        ui.horizontal_wrapped(|ui| {self.song_gain_control(ui,i,"Song gain");});
+        self.transition_gain_row(ui, i, "Song gain");
         let path=self.mix.tracks[i].path.clone();
         let measured=self.source_levels.get(&path).filter(|(a,_)|self.store.get(&path).is_some_and(|(b,_)|Arc::ptr_eq(a,b))).map(|(_,v)|v.clone());
         match measured {

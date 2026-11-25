@@ -89,3 +89,24 @@ pub fn seg_button(ui: &mut egui::Ui, text: &str, on: bool) -> egui::Response {
         .stroke(Stroke::NONE),
     )
 }
+
+/// Snap menu label + painted chevron (avoid missing dropdown glyph in UI font).
+pub fn snap_menu_button(ui: &mut egui::Ui, label: &str, add_contents: impl FnOnce(&mut egui::Ui)) {
+    let inner = ui.menu_button(egui::RichText::new(label).size(11.0).color(DIM), |ui| {
+        add_contents(ui);
+    });
+    let r = inner.response.rect;
+  let p = ui.painter();
+    let cx = r.right() - 9.0;
+    let cy = r.center().y;
+    p.add(egui::Shape::convex_polygon(
+        vec![
+            egui::pos2(cx - 3.5, cy - 2.0),
+            egui::pos2(cx + 3.5, cy - 2.0),
+            egui::pos2(cx, cy + 2.5),
+        ],
+        DIM,
+        egui::Stroke::NONE,
+    ));
+    let _ = inner;
+}

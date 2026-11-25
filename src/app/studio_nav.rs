@@ -323,7 +323,7 @@ impl App {
                 );
                 }
                 if let Some(Some((preset, col, meta))) = trans_data.get(k) {
-                    let (tr, _) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::hover());
+                    let (tr, tr_resp) = ui.allocate_exact_size(vec2(ui.available_width(), 22.0), Sense::click());
                     let dot = tr.left() + 10.0;
                     let p2 = ui.painter_at(tr);
                     p2.circle_filled(pos2(dot, tr.center().y), 3.0, *col);
@@ -334,6 +334,14 @@ impl App {
                         FontId::proportional(10.0),
                         MUTED,
                     );
+                    if tr_resp.clicked() {
+                        if let Some((_, incoming, _, _)) = self.mix.logical_transitions().get(k) {
+                            self.sel = None;
+                            self.sel_in = Some(*incoming);
+                            self.tab = Tab::Transition;
+                        }
+                    }
+                    tr_resp.on_hover_text("Open transition editor");
                 }
             }
         });

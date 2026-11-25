@@ -87,6 +87,8 @@ pub struct App {
     sidebar_open: bool,
     settings_open: bool,
     shortcuts_help: bool,
+    /// When set, `shell_frame_pin_demo` applied once for `MIXSTUDIO_DEMO_TAB` (captures only).
+    demo_shell_pinned: bool,
     master_popover: bool,
 }
 
@@ -203,7 +205,7 @@ impl App {
             lib,
             lib_q: String::new(), lib_path: String::new(), lib_sort: crate::library::SortCol::Filename, lib_asc: true, lib_key: false, lib_bpm: false, lib_pct: 6.0,
             lib_sel: Default::default(), lib_anchor: None, lib_view: vec![], lib_node: None, lib_cur: vec![], lib_cur_key: None, lib_found: vec![], lib_imp: String::new(), lib_remaps: vec![], lib_remaps_init: false, library_ui:Default::default(), lib_view_key: None, timeline_rect: Rect::NOTHING, sidebar_open: true,
-            settings_open: false, shortcuts_help: false, master_popover: false };
+            settings_open: false, shortcuts_help: false, demo_shell_pinned: false, master_popover: false };
         let lib_demo_capture = std::env::var("MIXSTUDIO_DEMO_TAB").as_deref() == Ok("library");
         if !a.lib.cfg.folders.is_empty() && !lib_demo_capture { a.lib.rescan(); }
         if let Some(d) = demo {
@@ -804,7 +806,7 @@ impl App {
                 Snapping::Half => "Half Bar",
                 Snapping::Full => "Bar",
             };
-            ui.menu_button(egui::RichText::new(format!("Snap: {snap} v")).size(11.0).color(DIM), |ui| {
+            theme::snap_menu_button(ui, &format!("Snap: {snap}"), |ui| {
                 ui.selectable_value(&mut self.snapping, Snapping::Off, "Snap: Off");
                 ui.selectable_value(&mut self.snapping, Snapping::Free, "Snap: Beat");
                 ui.selectable_value(&mut self.snapping, Snapping::Half, "Snap: Half Bar");
@@ -839,8 +841,12 @@ impl App {
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
+                ui.add_space(10.0);
                 if ui
-                    .add(egui::Button::new(egui::RichText::new("Zoom to Fit").size(11.0).color(DIM)).frame(false))
+                    .add(
+                        egui::Button::new(egui::RichText::new("Zoom to Fit").size(11.0).color(DIM))
+                            .min_size(vec2(76.0, 24.0)),
+                    )
                     .on_hover_text("Fit the whole mix in view")
                     .clicked()
                 {
@@ -848,7 +854,7 @@ impl App {
                     self.ppb = (w / self.mix.length_beats().max(64.0) as f32).clamp(0.3, 80.0);
                     self.scroll = 0.0;
                 }
-                ui.set_min_width(120.0);
+                ui.set_min_width(108.0);
                 ui.add(egui::Slider::new(&mut self.ppb, 0.3..=80.0).logarithmic(true).show_value(false));
                 if ui.small_button("+").on_hover_text("Zoom in").clicked() {
                     self.ppb = (self.ppb * 1.4).min(80.0);
@@ -1003,7 +1009,12 @@ impl eframe::App for App {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::E)) { self.split_here(); }
             if ctx.input(|i| !i.modifiers.command && i.key_pressed(egui::Key::Z)) { self.vzoom = !self.vzoom; }
             if ctx.input(|i| i.key_pressed(egui::Key::Enter)) { self.seek(0.0); }
-            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Slash)) { self.shortcuts_help = !self.shortcuts_help; }
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Slash)) {
+                self.shortcuts_help = !self.shortcuts_help;
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::Slash) && i.modifiers.shift && !i.modifiers.command) {
+                self.shortcuts_help = !self.shortcuts_help;
+            }
         }
         if self.playing() || self.loading > 0 || self.lib.scanning { ctx.request_repaint(); } else { ctx.request_repaint_after(std::time::Duration::from_millis(100)); }
         self.shell_frame(ctx);
@@ -1314,12 +1325,36 @@ impl App {
                     tp.text(r.center(), Align2::CENTER_CENTER, txt, FontId::proportional(9.5), TXT); } }
             else if !sample && self.stems.contains_key(&t.path) { tp.text(pos2(vis.right() - 6.0, tr.center().y), Align2::RIGHT_CENTER, "STEMS", FontId::proportional(8.5), C::from_rgb(200, 220, 255)); }
             if sample {
-                tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, FontId::proportional(9.5), TXT);
+                let sample_title = FontId::proportional(11.0);
+                let title_col = C::from_rgba_unmultiplied(255, 255, 255, 179);
+                tp.text(pos2(x, tr.center().y), Align2::LEFT_CENTER, &t.title, sample_title.clone(), title_col);
+                let tw = tp.layout_no_wrap(t.title.clone(), sample_title, title_col).size().x;
+                if !t.artist.is_empty() && x + tw + 8.0 < vis.right() - 24.0 {
+                    tp.text(
+                        pos2(x + tw + 6.0, tr.center().y),
+                        Align2::LEFT_CENTER,
+                        &t.artist,
+                        FontId::proportional(11.0),
+                        C::from_rgba_unmultiplied(255, 255, 255, 140),
+                    );
+                }
             }
             let wave = Rect::from_min_max(pos2(cr.left() + 1.0, tr.bottom() + 1.0), pos2(cr.right() - 1.0, cr.bottom() - 2.0));
             let cps = an.peak_sr as f64 / PEAK_HOP as f64;
-            let cy = wave.center().y;
-            let amp = ((cr.height() - title_h - 14.0) / 2.0).max(3.0);
+            let third_h = (wave.height() / 3.0).max(2.0);
+            let band_centers = [
+                wave.bottom() - third_h * 0.5,
+                wave.bottom() - third_h * 1.5,
+                wave.bottom() - third_h * 2.5,
+            ];
+            let paint_bands = |tp: &egui::Painter, px: f32, m: [u8; 3]| {
+                let f = |v: u8| v as f32 / 255.0;
+                let cols = [wave_low(), wave_mid(), wave_hi()];
+                for (k, &cy) in band_centers.iter().enumerate() {
+                    let a = (f(m[k]) * third_h * 0.48).min(third_h * 0.48).max(0.5);
+                    tp.line_segment([pos2(px + 0.5, cy - a), pos2(px + 0.5, cy + a)], Stroke::new(1.0_f32, cols[k]));
+                }
+            };
             let mut overlap: Vec<(f64, f64, bool, usize)> = fragment_trans.iter().filter(|x| x.0 == ti || x.1 == ti).map(|x| (x.2, x.3, x.0 == ti, x.1)).collect();
             overlap.dedup_by(|a,b|a.0==b.0 && a.1==b.1 && a.2==b.2);
             let partner = |o: &(f64, f64, bool, usize)| -> usize { if o.2 { o.3 } else { fragment_trans.iter().find(|x| x.1 == ti).map(|x| x.0).unwrap_or(ti) } };
@@ -1327,8 +1362,6 @@ impl App {
             let tstyle = self.mix.trans_stem_style; let tsc = |k: usize| { let c = STEM[k]; match tstyle { 1 => C::from_rgb(c.r() / 2 + 40, c.g() / 2 + 40, c.b() / 2 + 40), 2 => C::from_rgb(255 - c.r(), 255 - c.g(), 255 - c.b()), _ => c } };
             let grid = t.grid();
             let wave_step = if ppb < 12.0 { 2.0_f32 } else if ppb < 24.0 { 1.5_f32 } else { 1.0_f32 };
-            let w_low = wave_low();
-            let w_mid = wave_mid();
             let mut px = vis.left().floor();
             while px < vis.right() {
                 let (bb0, bb1) = (xb(px), xb((px + wave_step).min(vis.right())));
@@ -1336,8 +1369,8 @@ impl App {
                 let c1 = ((grid.region_sec(bb1, bb0) * cps) as i64).max(c0 + 1);
                 if c0 >= 0 && (c0 as usize) < an.peaks.len() {
                     let mut m = [0u8; 3]; for c in c0..c1.min(an.peaks.len() as i64) { let v = an.peaks[c as usize]; for k in 0..3 { m[k] = m[k].max(v[k]); } }
-                    let f = |v: u8| v as f32 / 255.0;
                     let ov = if sample { None } else { overlap.iter().find(|o| bb0 >= o.0 && bb0 <= o.1).filter(|o| my_stems.is_some() && self.stems.contains_key(&self.mix.tracks[partner(o)].path)) };
+                    let f = |v: u8| v as f32 / 255.0;
                     if let (Some(o), Some(stm)) = (ov, my_stems) {
                         // real stem lanes inside the transition
                         let lh = wave.height() / 4.0; let modes = self.mix.tracks[o.3].trans.stems;
@@ -1358,16 +1391,8 @@ impl App {
                             if muted { tp.line_segment([pos2(px + 0.5, ly - lh * 0.5), pos2(px + 0.5, ly + lh * 0.5)], Stroke::new(1.0_f32, if (px as i32).rem_euclid(6) < 3 { C::from_rgb(40, 40, 46) } else { C::from_rgb(28, 28, 32) })); }
                             tp.line_segment([pos2(px + 0.5, ly - a), pos2(px + 0.5, ly + a)], Stroke::new(1.0_f32, if muted { C::from_rgba_unmultiplied(150, 150, 150, 60) } else { col }));
                         }
-                    } else if sample {
-                        let lo = (f(m[0]) * amp).min(amp);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, w_mid));
                     } else {
-                        let lo = (f(m[0]) * amp).min(amp);
-                        let mi = (f(m[1]) * amp * 0.65).min(amp * 0.85);
-                        let hi = (f(m[2]) * amp * 0.5).min(amp * 0.6);
-                        tp.line_segment([pos2(px + 0.5, cy - lo), pos2(px + 0.5, cy + lo)], Stroke::new(1.0_f32, w_low));
-                        tp.line_segment([pos2(px + 0.5, cy - mi), pos2(px + 0.5, cy + mi)], Stroke::new(1.0_f32, w_mid));
-                        tp.line_segment([pos2(px + 0.5, cy - hi), pos2(px + 0.5, cy + hi)], Stroke::new(1.0_f32, wave_hi()));
+                        paint_bands(&tp, px, m);
                     }
                 }
                 px += wave_step;
@@ -1766,7 +1791,11 @@ impl App {
             if !ui.input(|i|i.pointer.primary_down()){self.samples.box_origin=None;self.status=format!("{} samples selected. Drag one to move the group.",self.samples.selected.len());}
         }
         if bg.clicked() { if let Some(pp) = bg.interact_pointer_pos() { self.seek(xb(pp.x)); if !self.select_sections { self.clear_section(); self.sel = None; } } }
-        if let Some(i) = clicked_trans { self.sel_in = Some(i); self.tab = Tab::Transition; }
+        if let Some(i) = clicked_trans {
+            self.sel = None;
+            self.sel_in = Some(i);
+            self.tab = Tab::Transition;
+        }
         else if let Some((ti, b, drag)) = clicked_clip {
             if drag>=10 {self.begin_sample_copy(ti,b,(drag-10) as usize);}
             if drag != 5 && drag != 6 && drag<10 { self.clear_section(); }
@@ -2619,9 +2648,45 @@ mod section_ui_tests {
         };
         assert!(has("Move"), "toolbar Move missing");
         assert!(has_prefix("Snap:"), "toolbar Snap missing");
+        assert!(!out.shapes.iter().any(|s| {
+            matches!(&s.shape, egui::epaint::Shape::Text(t) if t.galley.text().contains("Barv"))
+        }), "Snap label must not use missing chevron glyph");
         assert!(has("1"), "ruler bar 1 missing");
         drop(a);
         std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn transition_inspector_tab_wins_over_track_selection() {
+        let (mut a, _ctx, _rx, dir) = setup();
+        let mut second = a.mix.tracks[0].clone();
+        second.lane = 1;
+        second.start_beat = 32.0;
+        a.mix.tracks.push(second);
+        a.sel = Some(0);
+        a.sel_in = Some(1);
+        assert!(matches!(a.shell_editor_tab(), Some(Tab::Transition)));
+        drop(a);
+        std::fs::remove_dir_all(dir).ok();
+    }
+    #[test]
+    fn demo_tab_pin_does_not_override_library_after_first_frame() {
+        let prev = std::env::var("MIXSTUDIO_DEMO_TAB").ok();
+        std::env::set_var("MIXSTUDIO_DEMO_TAB", "track");
+        let (mut a, ctx, _rx, dir) = setup();
+        a.shell_frame_pin_demo();
+        assert_eq!(a.top, 3);
+        a.top = 2;
+        a.tab = Tab::Library;
+        a.shell_frame_pin_demo();
+        assert_eq!(a.top, 2, "Library view must not be reset by demo pin");
+        assert!(matches!(a.tab, Tab::Library));
+        drop(a);
+        std::fs::remove_dir_all(dir).ok();
+        match prev {
+            Some(v) => std::env::set_var("MIXSTUDIO_DEMO_TAB", v),
+            None => std::env::remove_var("MIXSTUDIO_DEMO_TAB"),
+        }
+        let _ = ctx;
     }
     #[test]
     fn beatgrid_surfaces_provisional_source_analysis() {
